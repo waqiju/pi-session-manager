@@ -7,6 +7,15 @@ import type {
   ToolResultMessage,
 } from "../types.ts";
 import {
+  CUSTOM_DATA_BUDGET,
+  DETAILS_BUDGET,
+  THINKING_BUDGET,
+  TOOL_ARG_BUDGET,
+  TOOL_RESULT_BUDGET,
+  truncateLines,
+  truncateLongStrings,
+} from "./truncate.ts";
+import {
   DETAILS_DROP_TOOLS,
   branchNote,
   fence,
@@ -14,8 +23,6 @@ import {
   frontmatter,
   imagePlaceholder,
   isEmptyDetails,
-  truncateHeadTail,
-  truncateLongStrings,
   type RenderOptions,
 } from "./shared.ts";
 
@@ -77,7 +84,7 @@ function renderEntry(entry: Entry, truncate: boolean): string | null {
     }
     case "custom": {
       const e = entry as any;
-      const data = truncate ? truncateLongStrings(e.data) : e.data;
+      const data = truncate ? truncateLongStrings(e.data, CUSTOM_DATA_BUDGET) : e.data;
       return `## 📦 Custom (${e.customType}) · ${time}\n\n${fence(JSON.stringify(data ?? null, null, 2), "json")}`;
     }
     case "custom_message": {
@@ -98,7 +105,7 @@ function renderMessage(msg: AgentMessage, time: string, truncate: boolean): stri
     case "toolResult":
       return renderToolResult(msg, time, truncate);
     case "bashExecution": {
-      const output = truncate ? truncateHeadTail(msg.output ?? "") : (msg.output ?? "");
+      const output = truncate ? truncateLines(msg.output ?? "", TOOL_RESULT_BUDGET) : (msg.output ?? "");
       const lines = [
         `## 💻 Bash · ${time}`,
         "",
@@ -136,11 +143,12 @@ function renderAssistant(msg: AssistantMessage, time: string, truncate: boolean)
   const parts: string[] = [header];
   for (const block of msg.content ?? []) {
     if (block.type === "thinking") {
-      parts.push(`**🧠 Thinking:**`, "", fence(block.thinking, "text"));
+      const thinking = truncate ? truncateLines(block.thinking, THINKING_BUDGET) : block.thinking;
+      parts.push(`**🧠 Thinking:**`, "", fence(thinking, "text"));
     } else if (block.type === "text") {
       parts.push(block.text);
     } else if (block.type === "toolCall") {
-      const args = truncate ? truncateLongStrings(block.arguments) : block.arguments;
+      const args = truncate ? truncateLongStrings(block.arguments, TOOL_ARG_BUDGET) : block.arguments;
       parts.push(`**🔧 \`${block.name}\`** (\`${block.id}\`)`, "", fence(JSON.stringify(args ?? {}, null, 2), "json"));
     }
   }
@@ -155,11 +163,11 @@ function renderToolResult(msg: ToolResultMessage, time: string, truncate: boolea
   const parts: string[] = [header];
   const content = msg.content;
   if (typeof content === "string") {
-    parts.push(fence(truncate ? truncateHeadTail(content) : content));
+    parts.push(fence(truncate ? truncateLines(content, TOOL_RESULT_BUDGET) : content));
   } else {
     for (const block of content ?? []) {
       if (block.type === "text") {
-        parts.push(fence(truncate ? truncateHeadTail(block.text) : block.text));
+        parts.push(fence(truncate ? truncateLines(block.text, TOOL_RESULT_BUDGET) : block.text));
       } else if (block.type === "image") {
         parts.push(imagePlaceholder(block.mimeType, block.data));
       }
@@ -167,10 +175,11 @@ function renderToolResult(msg: ToolResultMessage, time: string, truncate: boolea
   }
   if (msg.details != null && !isEmptyDetails(msg.details)) {
     // 方案 B: L1 丢弃输出型工具（bash/read/write/grep/...）的 details（纯冗余，text 已含全部信息）；
-    // edit 等含独有信息（diff/patch）的工具保留全量。空 details 任何级别都不渲染。
+    // edit 等含独有信息（diff/patch）的工具保留，按 DETAILS_BUDGET 做 line 级截断。
     const drop = truncate && DETAILS_DROP_TOOLS.has(msg.toolName ?? "");
     if (!drop) {
-      parts.push(`**details:**`, "", fence(JSON.stringify(msg.details, null, 2), "json"));
+      const details = truncate ? truncateLongStrings(msg.details, DETAILS_BUDGET) : msg.details;
+      parts.push(`**details:**`, "", fence(JSON.stringify(details, null, 2), "json"));
     }
   }
   return parts.join("\n\n");

@@ -6,9 +6,16 @@ let ts = 0;
 const id = () => `id${String(++seq).padStart(6, "0")}`;
 const time = () => new Date((ts += 1000)).toISOString();
 
-const LONG_RESULT = "HEAD_MARKER\n" + "x".repeat(5000) + "\nTAIL_MARKER";
-const LONG_ARG = "W".repeat(3000);
-export const THINKING_TEXT = "让我想想这个问题怎么处理，先读文件再总结。";
+/** 多行长文本 fixture：line 级截断只按整行切，填充内容必须是多行 */
+const pad = (prefix: string, n: number, width: number) =>
+  Array.from({ length: n }, (_, i) => `${prefix} ${String(i).padStart(3, "0")} ${"x".repeat(width)}`);
+
+// 202 行 ≈ 6KB（TOOL_RESULT_BUDGET=1000 → 截后：头 21 行 / 尾 14 行 / 省略 167 行）
+const LONG_RESULT = ["HEAD_MARKER", ...pad("result padding line", 200, 5), "TAIL_MARKER"].join("\n");
+// 60 行 ≈ 3.1KB（TOOL_ARG_BUDGET=800 → 截后：头 10 行 / 尾 7 行）
+const LONG_ARG = pad("arg padding line", 60, 30).join("\n");
+// 62 行 ≈ 1.9KB（THINKING_BUDGET=1000 → 截后：头 20 行 / 尾 14 行）
+export const THINKING_TEXT = ["THINK_HEAD", ...pad("thinking padding line", 60, 5), "THINK_TAIL"].join("\n");
 export const INTERMEDIATE_TEXT = "我先读取一下这个文件";
 export const FINAL_TEXT_T1 = "完成了：文件内容是一个测试包配置。";
 export const FINAL_TEXT_T2 = "好的，换个思路来做。";

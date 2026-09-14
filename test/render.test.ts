@@ -42,10 +42,11 @@ const l2 = renderL2(parsed.header, parsed.entries, OPTS);
 
 test("L0: 全量保留", () => {
   assert.ok(l0.includes("HEAD_MARKER") && l0.includes("TAIL_MARKER"));
-  assert.ok(l0.includes("x".repeat(5000)), "toolResult 完整保留");
-  assert.ok(!l0.includes("省略"), "L0 不应有省略标记");
+  assert.ok(l0.includes("result padding line 100"), "toolResult 完整保留");
+  assert.ok(!l0.includes("omitted"), "L0 不应有省略标记");
   assert.ok(l0.includes(THINKING_TEXT), "thinking 保留");
-  assert.ok(l0.includes("W".repeat(3000)), "toolCall args 完整保留");
+  assert.ok(l0.includes("thinking padding line 030"), "L0 thinking 完整");
+  assert.ok(l0.includes("arg padding line 030"), "toolCall args 完整保留");
   assert.ok(l0.includes(USER_PROMPT_1));
   assert.ok(l0.includes("*[image: image/png"), "图片占位符");
   assert.ok(l0.includes(COMPACTION_SUMMARY), "compaction summary");
@@ -71,17 +72,25 @@ test("L0 frontmatter", () => {
   assert.ok(l0.includes('source: "sample.jsonl"'));
 });
 
-test("L1: toolResult 头尾截断", () => {
+test("L1: toolResult line 级截断", () => {
   assert.ok(l1.includes("HEAD_MARKER"), "保留头部");
   assert.ok(l1.includes("TAIL_MARKER"), "保留尾部");
-  assert.ok(!l1.includes("x".repeat(5000)), "中间被省略");
-  assert.ok(l1.includes("省略"), "有省略标记");
+  assert.ok(l1.includes("result padding line 000"), "头部整行保留");
+  assert.ok(!l1.includes("result padding line 100"), "中间被省略");
+  assert.ok(l1.includes("... (omitted"), "有省略标记");
+  assert.ok(l1.includes("167 lines"), "省略行数正确");
 });
 
-test("L1: toolCall args 超长字符串截断，thinking 全量", () => {
-  assert.ok(!l1.includes("W".repeat(3000)), "write content 被截断");
-  assert.ok(l1.includes(THINKING_TEXT), "thinking 全量保留");
+test("L1: toolCall args 超长字符串 line 级截断", () => {
+  assert.ok(l1.includes("arg padding line 005"), "args 头部整行保留");
+  assert.ok(!l1.includes("arg padding line 030"), "args 中间被省略");
   assert.ok(l1.length < l0.length, "L1 比 L0 短");
+});
+
+test("L1: thinking line 级截断（头尾保留）", () => {
+  assert.ok(l1.includes("THINK_HEAD") && l1.includes("THINK_TAIL"), "thinking 头尾保留");
+  assert.ok(l1.includes("thinking padding line 000"), "thinking 头部整行保留");
+  assert.ok(!l1.includes("thinking padding line 030"), "thinking 中间被省略");
 });
 
 test("L2: 骨架", () => {
@@ -91,7 +100,7 @@ test("L2: 骨架", () => {
   assert.ok(l2.includes(FINAL_TEXT_T2), "轮2 最终答复保留");
   assert.ok(l2.includes(FINAL_TEXT_T3), "轮3 最终答复保留");
   assert.ok(!l2.includes(INTERMEDIATE_TEXT), "中间 assistant 消息丢弃");
-  assert.ok(!l2.includes(THINKING_TEXT), "thinking 丢弃");
+  assert.ok(!l2.includes("THINK_HEAD"), "thinking 丢弃");
   assert.ok(!l2.includes("HEAD_MARKER"), "toolResult 内容丢弃");
   assert.ok(l2.includes("- 🔧 **read** `/tmp/proj/package.json`"), "read 一行摘要");
   assert.ok(l2.includes("- 🔧 **write** `/tmp/proj/big.txt`"), "write 一行摘要");

@@ -12,7 +12,7 @@
   },
   "scripts": {
     "garden": "node src/cli.ts",
-    "test": "node --test test/render.test.ts test/cli.test.ts"
+    "test": "node --test test/render.test.ts test/truncate.test.ts test/cli.test.ts"
   },
   "license": "MIT"
 }

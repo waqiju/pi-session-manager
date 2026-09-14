@@ -1,15 +1,12 @@
 import type { Entry, SessionHeader, Usage } from "../types.ts";
 
+/** 生成器版本：行为变更时 bump，增量判断会检测到不一致并全量重生成 */
+export const GARDEN_VERSION = "0.3.0";
+
 export interface RenderOptions {
   /** 源文件名（xxx.jsonl），写入 frontmatter */
   sourceName?: string;
 }
-
-/** L1 截断常量（头 + 尾） */
-export const TRUNC_HEAD = 1500;
-export const TRUNC_TAIL = 500;
-/** toolCall arguments 中超过该长度的字符串值会被头尾截断（L1） */
-export const TRUNC_ARG_LIMIT = 2000;
 
 /** ISO 时间戳 → HH:MM:SS（UTC，稳定可读） */
 export function fmtTime(iso: string | undefined): string {
@@ -31,25 +28,6 @@ export function fence(text: string, info = ""): string {
   while ((m = re.exec(text))) max = Math.max(max, m[0].length);
   const f = "`".repeat(Math.max(3, max + 1));
   return `${f}${info}\n${text}\n${f}`;
-}
-
-/** 头 head + 尾 tail，中间标注省略字符数 */
-export function truncateHeadTail(text: string, head = TRUNC_HEAD, tail = TRUNC_TAIL): string {
-  if (text.length <= head + tail + 64) return text;
-  const omitted = text.length - head - tail;
-  return `${text.slice(0, head)}\n\n... (省略 ${omitted} 字符) ...\n\n${text.slice(text.length - tail)}`;
-}
-
-/** 深遍历 JSON：超过 limit 的字符串值做头尾截断（用于 L1 的 toolCall arguments） */
-export function truncateLongStrings(value: unknown, limit = TRUNC_ARG_LIMIT): unknown {
-  if (typeof value === "string") return value.length > limit ? truncateHeadTail(value) : value;
-  if (Array.isArray(value)) return value.map((v) => truncateLongStrings(v, limit));
-  if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) out[k] = truncateLongStrings(v, limit);
-    return out;
-  }
-  return value;
 }
 
 /** 图片 base64 → 占位符 */
@@ -168,6 +146,7 @@ export function frontmatter(
   lines.push(`cost_total: ${Math.round(stats.cost * 10000) / 10000}`);
   if (sourceName) lines.push(`source: ${q(sourceName)}`);
   lines.push(`generator: "garden"`);
+  lines.push(`version: ${q(GARDEN_VERSION)}`);
   lines.push("---");
   return lines.join("\n");
 }

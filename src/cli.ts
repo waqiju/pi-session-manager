@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,6 +8,7 @@ import { parseSessionFile } from "./parser.ts";
 import { renderL0 } from "./render/l0.ts";
 import { renderL1 } from "./render/l1.ts";
 import { renderL2 } from "./render/l2.ts";
+import { GARDEN_VERSION } from "./render/shared.ts";
 import type { Entry, SessionHeader } from "./types.ts";
 
 const USAGE = `garden — 把 pi sessions (.jsonl) 转成三级 markdown (l0/l1/l2)
@@ -56,6 +57,18 @@ export function collectJobs(input: string): { jobs: Job[]; defaultOut: string } 
   return { jobs, defaultOut: path.join(path.dirname(input), "garden") };
 }
 
+/** 增量判断：mtime 较新且含当前版本标记才算已是最新（逻辑变更后自动全量刷新） */
+export function isUpToDate(outPath: string, srcMtime: number): boolean {
+  if (!existsSync(outPath)) return false;
+  if (statSync(outPath).mtimeMs < srcMtime) return false;
+  try {
+    const head = readFileSync(outPath, "utf8");
+    return head.includes(`version: ${JSON.stringify(GARDEN_VERSION)}`);
+  } catch {
+    return false;
+  }
+}
+
 export function processFile(src: string, sub: string, outRoot: string): { written: string[]; skipped: string[] } {
   const parsed = parseSessionFile(src);
   const base = path.basename(src).replace(/\.jsonl$/, "");
@@ -65,7 +78,7 @@ export function processFile(src: string, sub: string, outRoot: string): { writte
   for (const { name, render } of LEVELS) {
     const outDir = path.join(outRoot, sub);
     const outPath = path.join(outDir, `${base}.${name}.md`);
-    if (existsSync(outPath) && statSync(outPath).mtimeMs >= srcMtime) {
+    if (isUpToDate(outPath, srcMtime)) {
       skipped.push(name);
       continue;
     }
