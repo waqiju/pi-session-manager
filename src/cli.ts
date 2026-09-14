@@ -8,10 +8,11 @@ import { parseSessionFile } from "./parser.ts";
 import { renderL0 } from "./render/l0.ts";
 import { renderL1 } from "./render/l1.ts";
 import { renderL2 } from "./render/l2.ts";
+import { renderL3 } from "./render/l3.ts";
 import { GARDEN_VERSION } from "./render/shared.ts";
 import type { Entry, SessionHeader } from "./types.ts";
 
-const USAGE = `garden — 把 pi sessions (.jsonl) 转成三级 markdown (l0/l1/l2)
+const USAGE = `garden — 把 pi sessions (.jsonl) 转成四级 markdown (l0/l1/l2/l3)
 
 用法:
   garden                     转换 ~/.pi/agent/sessions → ~/.pi/agent/garden
@@ -22,10 +23,11 @@ const USAGE = `garden — 把 pi sessions (.jsonl) 转成三级 markdown (l0/l1/
 增量: 源文件 mtime 比输出新才重新生成。
 `;
 
-const LEVELS: { name: "l0" | "l1" | "l2"; render: (h: SessionHeader | null, e: Entry[], o: { sourceName?: string }) => string }[] = [
+const LEVELS: { name: "l0" | "l1" | "l2" | "l3"; render: (h: SessionHeader | null, e: Entry[], o: { sourceName?: string }) => string }[] = [
   { name: "l0", render: renderL0 },
   { name: "l1", render: renderL1 },
   { name: "l2", render: renderL2 },
+  { name: "l3", render: renderL3 },
 ];
 
 interface Job {

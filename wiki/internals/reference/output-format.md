@@ -8,13 +8,13 @@ garden 生成的 markdown 的完整格式约定。面向：阅读者、后续处
 <garden根目录>/<sessions子目录名>/<session文件名去 .jsonl>.<level>.md
 ```
 
-`level` ∈ `l0` / `l1` / `l2`。目录结构镜像 sessions。
+`level` ∈ `l0` / `l1` / `l2` / `l3`。目录结构镜像 sessions。
 
 ## frontmatter（YAML，每份文件开头）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `level` | string | `"l0"` / `"l1"` / `"l2"` |
+| `level` | string | `"l0"` / `"l1"` / `"l2"` / `"l3"` |
 | `session_id` | string | session UUID |
 | `cwd` | string | session 工作目录 |
 | `started` / `ended` | string | ISO 时间戳（ended = 最后一条 entry 的时间） |
@@ -80,7 +80,8 @@ assistant 消息内：`thinking` 渲染为 `**🧠 Thinking:**` + 围栏代码�
 
 ## l2 结构差异
 
-- 只含：frontmatter、user prompt（全量）、每轮最后一条 assistant text、
+- 只含：frontmatter、user prompt（全量）、assistant text（全量，按时间序与
+  工具行交织）、thinking 占位段落、
   工具一行摘要（`- 🔧 **<tool>** \`<detail>\``，报错行尾加 ❌）、
   compaction / branch_summary 的 summary、分支提示
 - user 节标题带 turn 编号：`## 👤 User · #N · HH:MM:SS`（compaction 不重置）
@@ -90,4 +91,18 @@ assistant 消息内：`thinking` 渲染为 `**🧠 Thinking:**` + 围栏代码�
   - 一轮无含 text 的 assistant 时，统计退化为独立行 `> ⏱ 45s · out 5.3k`
 - 工具摘要 detail：bash 取命令首行；read/write/edit 取 path；其余取 JSON 摘要；
   超 80 字符截断
-- 无 thinking、无 toolResult 内容、无图片
+- 无 thinking 内容（只留占位段落 `**🧠 Thinking**`）、无 toolResult 内容、无图片
+
+## l3 结构差异
+
+在 l2 骨架基础上进一步精简为「纯问答对话」（2026-09-14 决策）：
+
+- 每轮只保留最后一段 assistant text；thinking 占位、中间 text、
+  工具一行摘要（含 ❌ 报错标记）全部丢弃
+- 「最后一段」= 轮内向前找最近的 assistant text（最后一条 assistant 消息
+  只有 toolCall 时取更早的 text）
+- assistant 节标题与轮级统计和 l2 完全一致（时间 = 轮内首条 assistant，
+  便于跨级别对照）
+- 轮内无 assistant text（纯工具轮 / abort / 仅 bashExecution）→ assistant 节
+  整体省略；有统计则退化为独立行 `> ⏱ 45s · out 5.3k`
+- user 节（带 turn 编号）、compaction / branch_summary summary、分支提示同 l2

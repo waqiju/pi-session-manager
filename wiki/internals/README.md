@@ -13,7 +13,7 @@ garden（pi-session-manager）的内部技术文档，仿 Kubernetes 文档范�
 ## 常用入口
 
 - garden 全景与模块划分：[system-map](concepts/system-map.md)
-- l0/l1/l2 三级输出的定位：[lod-levels](concepts/lod-levels.md)
+- l0/l1/l2/l3 四级输出的定位：[lod-levels](concepts/lod-levels.md)
 - 截断的设计哲学与预算依据：[truncation](concepts/truncation.md)
 - pi session 格式（garden 依赖的部分）：[session-format](concepts/session-format.md)
 - 日常转换 / 增量 / 全量重生成：[run-conversion](tasks/run-conversion.md)

@@ -14,7 +14,7 @@ garden 的 `renderEntry` / `renderMessage` default 分支会把未知类型渲�
 1. `src/types.ts`：补类型定义（注意：本仓库用 type-stripping，只允许可擦除语法）
 2. `src/render/full.ts`：`renderEntry`（新 entry 类型）或 `renderMessage`（新 message role）
    加分支——决定 l0/l1 怎么渲染（参考取舍表：wiki/internals/concepts/lod-levels.md）
-3. `src/render/l2.ts`：决定骨架级是否保留（默认忽略；若像 compaction 一样关键则保留摘要）
+3. `src/render/skeleton.ts`：决定骨架级（l2/l3）是否保留（默认忽略；若像 compaction 一样关键则保留摘要）
 4. `test/sample.ts`：fixture 补一个新类型实例；`render.test.ts` 补断言
    （entries 总数断言也要 +1）
 5. `npm test`，然后 bump `GARDEN_VERSION` 并全量重生成（见 Related 的 tune-budget）
@@ -22,7 +22,7 @@ garden 的 `renderEntry` / `renderMessage` default 分支会把未知类型渲�
 ## Verify
 
 - `grep -rn "❓ 未知" ~/.pi/agent/garden --include="*.l1.md" | head` 无新增
-- 用一个含新类型的真实 session 单独转换并人工抽查三级输出
+- 用一个含新类型的真实 session 单独转换并人工抽查四级输出
 
 ## Troubleshooting
 

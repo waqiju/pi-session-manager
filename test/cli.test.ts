@@ -17,7 +17,7 @@ function setup(): { root: string; sessionsDir: string } {
   return { root, sessionsDir };
 }
 
-test("CLI: 目录模式生成三级 markdown，增量跳过", () => {
+test("CLI: 目录模式生成四级 markdown，增量跳过", () => {
   const { root, sessionsDir } = setup();
   try {
     const out1 = execFileSync(process.execPath, [CLI, sessionsDir], { encoding: "utf8" });
@@ -28,12 +28,14 @@ test("CLI: 目录模式生成三级 markdown，增量跳过", () => {
     const l0 = path.join(gardenDir, "2026-09-14T01-00-00_test.l0.md");
     const l1 = path.join(gardenDir, "2026-09-14T01-00-00_test.l1.md");
     const l2 = path.join(gardenDir, "2026-09-14T01-00-00_test.l2.md");
-    for (const f of [l0, l1, l2]) assert.ok(existsSync(f), `应生成 ${f}`);
+    const l3 = path.join(gardenDir, "2026-09-14T01-00-00_test.l3.md");
+    for (const f of [l0, l1, l2, l3]) assert.ok(existsSync(f), `应生成 ${f}`);
 
     const s0 = readFileSync(l0, "utf8");
     const s1 = readFileSync(l1, "utf8");
     const s2 = readFileSync(l2, "utf8");
-    assert.ok(s0.length > s1.length && s1.length > s2.length, "l0 > l1 > l2");
+    const s3 = readFileSync(l3, "utf8");
+    assert.ok(s0.length > s1.length && s1.length > s2.length && s2.length > s3.length, "l0 > l1 > l2 > l3");
 
     // 第二次运行：全部跳过
     const out2 = execFileSync(process.execPath, [CLI, sessionsDir], { encoding: "utf8" });

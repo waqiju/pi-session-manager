@@ -1,7 +1,7 @@
 {
   "name": "pi-session-manager",
-  "version": "0.1.2",
-  "description": "garden: 把 pi 的 session 记录 (.jsonl) 转换为三级可读 markdown (l0/l1/l2)",
+  "version": "0.2.0",
+  "description": "garden: 把 pi 的 session 记录 (.jsonl) 转换为四级可读 markdown (l0/l1/l2/l3)",
   "type": "module",
   "private": true,
   "bin": {

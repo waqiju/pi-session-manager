@@ -33,7 +33,7 @@ assistant 消息的 `content` 是 part 数组：`thinking` / `text` / `toolCall`
 ## tree 结构与 garden 的线性化
 
 entry 经 `id` / `parentId` 组成**树**（分支：用户回退后继续对话）。
-garden 不做树重建，按**文件 append 顺序**渲染全部三级，理由：
+garden 不做树重建，按**文件 append 顺序**渲染全部四级，理由：
 
 - 文件顺序 = 事件发生的时间顺序，本身是忠实日志
 - 分支的实际形态是 `...A1, A2, A3（废弃支）, branch_summary, B1, B2...`，

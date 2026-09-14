@@ -3,7 +3,7 @@
 ## 项目概述
 
 garden（pi-session-manager）：把 pi 的 session 记录（`.jsonl`，机器格式、人类阅读困难）
-转换为三级 markdown 归档（l0 / l1 / l2），输出到与 sessions 同级的 `garden/` 目录。
+转换为四级 markdown 归档（l0 / l1 / l2 / l3），输出到与 sessions 同级的 `garden/` 目录。
 
 ## 技术栈
 

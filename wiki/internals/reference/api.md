@@ -10,19 +10,26 @@
 | `parseSessionText` | `(text: string) => ParsedSession` | 解析 jsonl 文本；残缺末行跳过 |
 | `ParsedSession` | `{ header: SessionHeader \| null; entries: Entry[] }` | — |
 
-## render/l0.ts · l1.ts · l2.ts
+## render/l0.ts · l1.ts · l2.ts · l3.ts
 
 | 导出 | 说明 |
 |------|------|
 | `renderL0(header, entries, opts?: { sourceName?: string }) => string` | 全量渲染 |
 | `renderL1(header, entries, opts?) => string` | 全量渲染 + 截断（见 wiki/internals/concepts/truncation.md） |
 | `renderL2(header, entries, opts?) => string` | 骨架渲染（见 wiki/internals/concepts/lod-levels.md） |
+| `renderL3(header, entries, opts?) => string` | 纯问答渲染：l2 基础上每轮只留最后一段 assistant text |
 
 ## render/full.ts
 
 | 导出 | 说明 |
 |------|------|
 | `renderFull(header, entries, opts: { level: "l0" \| "l1"; sourceName?: string }) => string` | L0/L1 共用引擎；`level` 决定截断开关 |
+
+## render/skeleton.ts
+
+| 导出 | 说明 |
+|------|------|
+| `renderSkeleton(header, entries, opts: { level: "l2" \| "l3"; sourceName?: string }) => string` | L2/L3 共用引擎；`level` 决定 finalOnly（l3 每轮只留最终答复） |
 
 ## render/truncate.ts
 

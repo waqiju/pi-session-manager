@@ -4,6 +4,7 @@ import { parseSessionText } from "../src/parser.ts";
 import { renderL0 } from "../src/render/l0.ts";
 import { renderL1 } from "../src/render/l1.ts";
 import { renderL2 } from "../src/render/l2.ts";
+import { renderL3 } from "../src/render/l3.ts";
 import {
   COMPACTION_SUMMARY,
   EDIT_DIFF,
@@ -39,6 +40,7 @@ test("parser: 容忍残缺末行", () => {
 const l0 = renderL0(parsed.header, parsed.entries, OPTS);
 const l1 = renderL1(parsed.header, parsed.entries, OPTS);
 const l2 = renderL2(parsed.header, parsed.entries, OPTS);
+const l3 = renderL3(parsed.header, parsed.entries, OPTS);
 
 test("L0: 全量保留", () => {
   assert.ok(l0.includes("HEAD_MARKER") && l0.includes("TAIL_MARKER"));
@@ -215,7 +217,66 @@ test("L2: thinking 占位 + text 与工具按序交织（2026-09-14）", () => {
   assert.ok(iThink > -1 && iThink < iMid && iMid < iTool && iTool < iFinal, "占位→中间text→工具→最终text 按序");
 });
 
+test("L3: 纯问答视图（每轮只留最终答复）", () => {
+  assert.ok(l3.includes('level: "l3"'));
+  assert.ok(l3.includes(USER_PROMPT_1), "user prompt 保留");
+  assert.ok(l3.includes("## 👤 User · #1 · 01:00:04"), "turn 编号保留");
+  assert.ok(l3.includes(FINAL_TEXT_T1), "轮1 最终答复保留");
+  assert.ok(l3.includes(FINAL_TEXT_T2), "轮2 最终答复保留");
+  assert.ok(l3.includes(FINAL_TEXT_T3), "轮3 最终答复保留");
+  assert.ok(!l3.includes(INTERMEDIATE_TEXT), "中间 assistant text 丢弃");
+  assert.ok(!l3.includes("**🧠 Thinking**"), "thinking 占位丢弃");
+  assert.ok(!l3.includes("🔧"), "工具行（含 ❌ 报错标记）丢弃");
+  assert.ok(!l3.includes("echo hi"), "bashExecution 行丢弃");
+  assert.ok(l3.includes(COMPACTION_SUMMARY), "compaction summary 保留");
+  assert.ok(l3.includes("跳回分支点"), "分支提示保留");
+  // 节标题与轮级统计同 l2 完全一致（时间 = 轮内首条 assistant）
+  assert.ok(l3.includes("## 🤖 Assistant · 01:00:05 · kimi-k3 · ⏱ 9s · out 300"), "节标题+统计同 l2");
+  assert.ok(l3.length < l2.length, "L3 比 L2 短");
+});
+
+test("L3: 边界——轮内向前取最后 text / 无 text 轮省略 assistant 节", () => {
+  const t = (s: number) => new Date(Date.parse("2026-09-14T01:00:00.000Z") + s * 1000).toISOString();
+  const mk = (id: string, parentId: string | null, sec: number, message: unknown) =>
+    ({ type: "message", id, parentId, timestamp: t(sec), message });
+  const entries = [
+    // 轮1：a1 有 text + toolCall，a2（最后一条）只有 toolCall → 向前取 a1 的 text
+    mk("u1", null, 0, { role: "user", content: "q1" }),
+    mk("a1", "u1", 1, { role: "assistant", content: [
+      { type: "text", text: "早期答复" },
+      { type: "toolCall", id: "t:0", name: "bash", arguments: { command: "ls" } },
+    ], model: "m", stopReason: "toolUse" }),
+    mk("r1", "a1", 2, { role: "toolResult", toolCallId: "t:0", toolName: "bash", content: [{ type: "text", text: "ok" }] }),
+    mk("a2", "r1", 3, { role: "assistant", content: [
+      { type: "toolCall", id: "t:1", name: "bash", arguments: { command: "pwd" } },
+    ], model: "m", stopReason: "toolUse" }),
+    mk("r2", "a2", 4, { role: "toolResult", toolCallId: "t:1", toolName: "bash", content: [{ type: "text", text: "ok" }] }),
+    // 轮2：assistant 整轮无 text（abort 型）→ 节省略，统计退化为 meta 行
+    mk("u2", "r2", 10, { role: "user", content: "q2" }),
+    mk("a3", "u2", 11, { role: "assistant", content: [
+      { type: "toolCall", id: "t:2", name: "bash", arguments: { command: "rm" } },
+    ], model: "m", stopReason: "toolUse", usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 } }),
+    mk("r3", "a3", 13, { role: "toolResult", toolCallId: "t:2", toolName: "bash", content: [{ type: "text", text: "ok" }] }),
+    // 轮3：正常最终答复
+    mk("u3", "r3", 20, { role: "user", content: "q3" }),
+    mk("a4", "u3", 21, { role: "assistant", content: [{ type: "text", text: "最终答复" }], model: "m", stopReason: "stop" }),
+  ];
+  const md = renderL3(null, entries as never);
+  const iU1 = md.indexOf("## 👤 User · #1");
+  const iU2 = md.indexOf("## 👤 User · #2");
+  const iU3 = md.indexOf("## 👤 User · #3");
+  const turn1 = md.slice(iU1, iU2);
+  assert.ok(turn1.includes("早期答复"), "最后一条无 text 时向前找轮内最近 text");
+  assert.ok(!turn1.includes("🔧"), "工具行不出现");
+  const turn2 = md.slice(iU2, iU3);
+  assert.ok(!turn2.includes("## 🤖 Assistant"), "无 text 轮省略 assistant 节");
+  assert.ok(turn2.includes("> ⏱ 3s · out 5"), "统计退化为独立 meta 行");
+  assert.ok(md.includes("最终答复"), "轮3 正常");
+  assert.equal(md.match(/## 🤖 Assistant/g)?.length, 2, "全文只有两个 assistant 节");
+});
+
 test("渲染确定性：两次结果一致", () => {
   assert.equal(renderL0(header, entries, OPTS), l0);
   assert.equal(renderL2(header, entries, OPTS), l2);
+  assert.equal(renderL3(header, entries, OPTS), l3);
 });

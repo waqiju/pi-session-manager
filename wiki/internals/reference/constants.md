@@ -23,7 +23,7 @@
 
 | 常量 | 当前值 | 语义 |
 |------|--------|------|
-| `GARDEN_VERSION` | `"0.6.1"` | 渲染行为版本。写入 frontmatter `version`；增量判断要求输出文件的 version 与之一致，否则重新生成 |
+| `GARDEN_VERSION` | `"0.7.0"` | 渲染行为版本。写入 frontmatter `version`；增量判断要求输出文件的 version 与之一致，否则重新生成 |
 
 版本历史：
 - `0.2.0` 引入版本标记与 details 丢弃策略
@@ -35,6 +35,10 @@
   thinking 改为占位段落（原为丢弃）；节标题时间改为轮内首条 assistant
 - `0.6.1` l1：session_info 会话名 inline 封顶 100（`SESSION_NAME_BUDGET`；
   pi-ssh-remote 会把首条 prompt 全文拼进名字，实测 242 字符）
+- `0.7.0` 新增 l3 级别：l2 基础上每轮只保留最后一段 assistant text
+  （thinking 占位 / 中间 text / 工具一行摘要丢弃）——即 0.6.0 前 l2
+  「只留每轮最终答复」的行为回归为独立级别，且更进一步去掉工具行。
+  l2.ts 引擎抽为 `skeleton.ts`（l2/l3 共用，finalOnly 开关），l2.ts 改为薄封装
 
 ## details 丢弃名单（src/render/shared.ts）
 

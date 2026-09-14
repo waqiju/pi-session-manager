@@ -1,6 +1,6 @@
 # 运行转换（run-conversion）
 
-把 sessions 目录转换成 garden 三级 markdown，含增量语义。
+把 sessions 目录转换成 garden 四级 markdown，含增量语义。
 
 ## Before You Begin
 

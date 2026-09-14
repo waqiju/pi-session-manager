@@ -1,6 +1,6 @@
 # 系统地图（garden 全景）
 
-garden 是单向的格式转换器：pi 的 session jsonl → 三级 markdown 归档。无服务端、无状态、可重复运行（幂等 + 增量）。
+garden 是单向的格式转换器：pi 的 session jsonl → 四级 markdown 归档。无服务端、无状态、可重复运行（幂等 + 增量）。
 
 ## 全景
 
@@ -21,13 +21,15 @@ garden 是单向的格式转换器：pi 的 session jsonl → 三级 markdown �
 │     render/l1.ts   ├→ render/full.ts（L0/L1 共用引擎，       │
 │                    │    差异仅是截断开关）                   │
 │                    │    截断逻辑：render/truncate.ts         │
-│     render/l2.ts  ─┘   骨架渲染（独立实现）                  │
+│     render/l2.ts  ─┤                                        │
+│     render/l3.ts   ┘→ render/skeleton.ts（L2/L3 共用引擎，   │
+│                         差异是 finalOnly 开关）              │
 │   增量判断 isUpToDate：输出 mtime ≥ 源 且 frontmatter        │
 │   version == GARDEN_VERSION                                 │
 └────────────────────────────────────────────────────────────┘
                      ▼
 ┌────────────────────────────────────────────────────────────┐
-│ ~/.pi/agent/garden/--<cwd 转义>--/*.l0.md / .l1.md / .l2.md │
+│ ~/.pi/agent/garden/--<cwd 转义>--/*.{l0,l1,l2,l3}.md        │
 │   目录结构镜像 sessions                                     │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -41,7 +43,8 @@ garden 是单向的格式转换器：pi 的 session jsonl → 三级 markdown �
 | `src/types.ts` | session-format v3 的全部 entry / message 类型 |
 | `src/render/full.ts` | L0/L1 渲染引擎：按文件顺序忠实渲染所有 entry |
 | `src/render/l0.ts` `l1.ts` | 薄封装：renderFull + level 开关 |
-| `src/render/l2.ts` | 骨架渲染：user prompt 全量 + 每轮最终答复 + 工具一行摘要 |
+| `src/render/l2.ts` `l3.ts` | 薄封装：renderSkeleton + level 开关 |
+| `src/render/skeleton.ts` | L2/L3 骨架引擎：user prompt 全量 + assistant text（l2 全量交织 / l3 每轮只留最终答复）+ 工具一行摘要（仅 l2） |
 | `src/render/truncate.ts` | 截断（inline 级 + line 级）与全部预算常量 |
 | `src/render/shared.ts` | frontmatter、统计、围栏、分支提示、`GARDEN_VERSION` |
 
@@ -51,6 +54,8 @@ garden 是单向的格式转换器：pi 的 session jsonl → 三级 markdown �
   按文件 append 顺序输出；`parentId` 不是上一条时插入 `> ⑂ 跳回分支点` 提示
   （理由与细节见 wiki/internals/concepts/session-format.md）。
 - **L0/L1 共用引擎**：两者差异只是截断开关（`truncate` 布尔），避免两份渲染逻辑漂移。
+- **L2/L3 共用引擎**：差异只是 finalOnly 开关（l3 每轮只留最后一段 assistant text），
+  与 L0/L1 同一模式。
 - **增量语义**：session 是 append-only，源文件变新才重生成；渲染逻辑变更靠
   `GARDEN_VERSION` bump 触发全量重生成（流程见 wiki/internals/tasks/tune-budget.md）。
 
