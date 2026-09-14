@@ -10,8 +10,10 @@ const time = () => new Date((ts += 1000)).toISOString();
 const pad = (prefix: string, n: number, width: number) =>
   Array.from({ length: n }, (_, i) => `${prefix} ${String(i).padStart(3, "0")} ${"x".repeat(width)}`);
 
-// 202 行 ≈ 6KB（TOOL_RESULT_BUDGET=1000 → 截后：头 21 行 / 尾 14 行 / 省略 167 行）
-const LONG_RESULT = ["HEAD_MARKER", ...pad("result padding line", 200, 5), "TAIL_MARKER"].join("\n");
+// 202 行 ≈ 6.5KB（TOOL_RESULT_BUDGET=1000）；其中第 6 行是 618 字符超长行（带空格，测 inline 软断行）
+const resultPad = pad("result padding line", 200, 5);
+resultPad[5] = "result padding line 005-long " + Array.from({ length: 140 }, (_, i) => `w${i}`).join(" ");
+const LONG_RESULT = ["HEAD_MARKER", ...resultPad, "TAIL_MARKER"].join("\n");
 // 60 行 ≈ 3.1KB（TOOL_ARG_BUDGET=800 → 截后：头 10 行 / 尾 7 行）
 const LONG_ARG = pad("arg padding line", 60, 30).join("\n");
 // 62 行 ≈ 1.9KB（THINKING_BUDGET=1000 → 截后：头 20 行 / 尾 14 行）

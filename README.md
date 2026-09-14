@@ -35,14 +35,21 @@ node src/cli.ts ... -o <输出目录>  # 自定义输出
 | model_change / label / custom 等 | 保留 | 保留 | 忽略（session 名进 frontmatter） |
 | 图片 | 占位符 | 占位符 | 丢弃 |
 
-### line 级截断规则（l0 → l1）
+### 截断规则（l0 → l1）：inline 级 + line 级
 
-- 文本 ≤ 预算：原样保留；否则按 **6:4** 分头/尾预算
-- 从两端 greedy 拿**整行**，跨越预算边界的行完整保留（宁多不少，绝不截在行中间）
+两层流水线：`原始文本 → 逐行 inline 截断 → 块级 line 截断`
+
+**inline 级（行内）**：
+- 任何一行 > 500 字符 → `<head> ... (omitted X chars) ... <tail>`（6:4，即头 300 / 尾 200）
+- **永不硬切**：head 向后、tail 向前找最近的空白/逗号再断；找不到分隔符的行整行保留（宁多不少）
+- 省略量 < 64 字符不截（至少省出一个 marker 的量级，否则只增噪声）
+
+**line 级（块）**：
+- 块 ≤ 预算：直接保留（但其中的超长行已被 inline 截断）
+- 否则按 **6:4** 分头/尾预算，从两端 greedy 拿**整行**，跨界行完整保留（宁多不少）
 - 头尾行数重叠时返回原文（不做无意义截断）
 - 中间插入标记：`... (omitted X chars / Y lines) ...`
-- 已知行为：单行超长块整行保留（留给以后的 inline 级截断）
-- 预算常量在 `src/render/truncate.ts`：`TOOL_RESULT_BUDGET=1000`、`TOOL_ARG_BUDGET=800`、`THINKING_BUDGET=1000`、`DETAILS_BUDGET=4000`。调整预算后 bump `GARDEN_VERSION`（`src/render/shared.ts`），下次运行自动全量重生成
+- 预算常量在 `src/render/truncate.ts`：`TOOL_RESULT_BUDGET=1000`、`TOOL_ARG_BUDGET=800`、`THINKING_BUDGET=1000`、`DETAILS_BUDGET=4000`、`INLINE_LIMIT=500`。调整后 bump `GARDEN_VERSION`（`src/render/shared.ts`），下次运行自动全量重生成
 
 - 每份 md 带 YAML frontmatter：session id、cwd、起止时间、会话名、模型、消息计数、token/成本汇总
 - 分支（tree 结构）不做重建，按文件顺序渲染；`parentId` 跳回时插入 `> ⑂ 跳回分支点 <id>` 提示
@@ -62,13 +69,13 @@ src/
   types.ts        # session-format v3 类型
   render/
     shared.ts     # frontmatter、围栏、分支提示、GARDEN_VERSION
-    truncate.ts   # line 级截断（6:4 整行 greedy）+ 预算常量
+    truncate.ts   # inline 级 + line 级截断（6:4 整行 greedy + 行内封顶）+ 预算常量
     full.ts       # L0/L1 引擎（差异仅是截断开关）
     l0.ts l1.ts   # 薄封装
     l2.ts         # 骨架渲染
 test/
   sample.ts         # 构造 fixture
   render.test.ts    # 渲染断言
-  truncate.test.ts  # 截断算法单测
+  truncate.test.ts  # 截断算法单测（inline + line）
   cli.test.ts       # 端到端（含增量、版本刷新）
 ```

@@ -78,13 +78,29 @@ test("L1: toolResult line 级截断", () => {
   assert.ok(l1.includes("result padding line 000"), "头部整行保留");
   assert.ok(!l1.includes("result padding line 100"), "中间被省略");
   assert.ok(l1.includes("... (omitted"), "有省略标记");
-  assert.ok(l1.includes("167 lines"), "省略行数正确");
+  assert.ok(l1.includes("181 lines"), "省略行数正确");
+});
+
+test("L1: 超长行 inline 截断（软断行）", () => {
+  assert.ok(l0.includes(" w85 "), "L0 保留超长行中部");
+  assert.ok(!l1.includes(" w85 "), "L1 超长行中部被省略");
+  assert.ok(l1.includes("result padding line 005-long w0 w1 w2"), "超长行头部保留");
+  assert.ok(l1.includes("w139"), "超长行尾部保留");
+  assert.ok(/005-long( w\d+)+ \.\.\. \(omitted \d+ chars\) \.\.\. /.test(l1), "断在词边界 + inline marker");
 });
 
 test("L1: toolCall args 超长字符串 line 级截断", () => {
-  assert.ok(l1.includes("arg padding line 005"), "args 头部整行保留");
+  assert.ok(l1.includes("arg padding line 002"), "args 头部整行保留");
   assert.ok(!l1.includes("arg padding line 030"), "args 中间被省略");
   assert.ok(l1.length < l0.length, "L1 比 L0 短");
+});
+
+test("L1: args JSON 物理行被 inline 封顶（stringify 转义合行）", () => {
+  const m = l1.match(/"content": "arg padding[^\n]*/);
+  assert.ok(m, "找到 write content 的 JSON 物理行");
+  assert.ok(m[0].length <= 600, `物理行长度 ${m[0].length} 应被封顶`);
+  assert.ok(m[0].includes("... (omitted"), "物理行上有 inline marker");
+  assert.ok(m[0].includes("arg padding line 059"), "物理行尾部保留");
 });
 
 test("L1: thinking line 级截断（头尾保留）", () => {

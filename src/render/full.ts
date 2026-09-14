@@ -12,6 +12,7 @@ import {
   THINKING_BUDGET,
   TOOL_ARG_BUDGET,
   TOOL_RESULT_BUDGET,
+  truncateEachLine,
   truncateLines,
   truncateLongStrings,
 } from "./truncate.ts";
@@ -85,7 +86,9 @@ function renderEntry(entry: Entry, truncate: boolean): string | null {
     case "custom": {
       const e = entry as any;
       const data = truncate ? truncateLongStrings(e.data, CUSTOM_DATA_BUDGET) : e.data;
-      return `## 📦 Custom (${e.customType}) · ${time}\n\n${fence(JSON.stringify(data ?? null, null, 2), "json")}`;
+      let json = JSON.stringify(data ?? null, null, 2);
+      if (truncate) json = truncateEachLine(json);
+      return `## 📦 Custom (${e.customType}) · ${time}\n\n${fence(json, "json")}`;
     }
     case "custom_message": {
       const e = entry as any;
@@ -149,7 +152,9 @@ function renderAssistant(msg: AssistantMessage, time: string, truncate: boolean)
       parts.push(block.text);
     } else if (block.type === "toolCall") {
       const args = truncate ? truncateLongStrings(block.arguments, TOOL_ARG_BUDGET) : block.arguments;
-      parts.push(`**🔧 \`${block.name}\`** (\`${block.id}\`)`, "", fence(JSON.stringify(args ?? {}, null, 2), "json"));
+      let json = JSON.stringify(args ?? {}, null, 2);
+      if (truncate) json = truncateEachLine(json); // stringify 转义换行会合并出超长物理行
+      parts.push(`**🔧 \`${block.name}\`** (\`${block.id}\`)`, "", fence(json, "json"));
     }
   }
   if (msg.stopReason && msg.stopReason !== "stop" && msg.stopReason !== "toolUse") {
@@ -179,7 +184,9 @@ function renderToolResult(msg: ToolResultMessage, time: string, truncate: boolea
     const drop = truncate && DETAILS_DROP_TOOLS.has(msg.toolName ?? "");
     if (!drop) {
       const details = truncate ? truncateLongStrings(msg.details, DETAILS_BUDGET) : msg.details;
-      parts.push(`**details:**`, "", fence(JSON.stringify(details, null, 2), "json"));
+      let json = JSON.stringify(details, null, 2);
+      if (truncate) json = truncateEachLine(json);
+      parts.push(`**details:**`, "", fence(json, "json"));
     }
   }
   return parts.join("\n\n");

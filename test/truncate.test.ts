@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { truncateLines, truncateLongStrings } from "../src/render/truncate.ts";
+import { truncateEachLine, truncateInline, truncateLines, truncateLongStrings } from "../src/render/truncate.ts";
 
 test("短文本原样返回（块级阈值）", () => {
   const t = "line1\nline2";
@@ -38,9 +38,54 @@ test("头尾重叠 → 返回原文（不做无意义截断）", () => {
   assert.equal(truncateLines(text, 100), text);
 });
 
-test("单行超长：整行保留（已知行为，留给 inline 级处理）", () => {
-  const text = "z".repeat(500);
-  assert.equal(truncateLines(text, 100), text);
+test("单行超长：先被 inline 截断，再整块放行", () => {
+  // 600 字符单行（有分隔符）→ inline 截断后仍超预算 100 → 单行重叠 → 返回 inline 截断结果
+  const out = truncateLines("z ".repeat(300), 100);
+  assert.ok(out.includes("(omitted 99 chars)"), "inline 截断生效");
+  assert.ok(!out.includes("lines)"), "单行块无 line 级 marker");
+  assert.ok(out.length < 600, "结果比原行短");
+  // 无分隔符的行：永不硬切，整行保留
+  assert.equal(truncateLines("z".repeat(600), 100), "z".repeat(600));
+  // 恰好在 inline 限额内（500）的单行：保持完整
+  assert.equal(truncateLines("z".repeat(500), 100), "z".repeat(500));
+});
+
+test("truncateInline: 软断行（head 向后、tail 向前找分隔符）", () => {
+  const line = "w ".repeat(400); // 800 字符，空格在奇数位
+  const out = truncateInline(line, 500);
+  // head 300 → 空格在 301 → cut=301；tail 起点 600 → 空格在 599 → tailFrom=600
+  // omitted = 600-301 = 299
+  assert.ok(out.includes("(omitted 299 chars)"));
+  assert.ok(out.endsWith(line.slice(600)), "tail 从分隔符后开始，不硬切");
+  assert.ok(!/\s$/.test(out.split(" ... ")[0]), "head 断在分隔符前");
+});
+
+test("truncateInline: 无分隔符 → 整行保留（永不硬切）", () => {
+  const line = "x".repeat(700);
+  assert.equal(truncateInline(line, 500), line);
+});
+
+test("truncateInline: 省略量过小则不截", () => {
+  const line = "a".repeat(300) + " " + "b".repeat(209); // 510 字符，断点交叉/省略量=1
+  assert.equal(truncateInline(line, 500), line);
+});
+
+test("truncateEachLine: 只封顶长物理行，其他不动", () => {
+  const text = `short\n${"x ".repeat(350)}\nalso short`;
+  const out = truncateEachLine(text, 500);
+  const lines = out.split("\n");
+  assert.equal(lines[0], "short");
+  assert.ok(lines[1].includes("(omitted 199 chars)"));
+  assert.equal(lines[2], "also short");
+});
+
+test("inline + line 两层组合：每行封顶且块预算生效", () => {
+  // 30 行 × 604 字符（有分隔符 → 每行 inline 到 ~530）
+  const lines = Array.from({ length: 30 }, (_, i) => `L${String(i).padStart(2, "0")} ` + "ab ".repeat(200));
+  const out = truncateLines(lines.join("\n"), 1000);
+  const inlineCount = (out.match(/\(omitted 103 chars\)/g) ?? []).length;
+  assert.equal(inlineCount, 3, "保留的 3 行各有 inline marker");
+  assert.ok(out.includes("chars / 27 lines"), "line 级省略 27 行");
 });
 
 test("truncateLongStrings: 深遍历 JSON，只截超长字符串", () => {
