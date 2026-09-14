@@ -34,13 +34,18 @@ interface Job {
   sub: string;
 }
 
+/** 单文件路径推导：<root>/sessions/<sub>/<file>.jsonl → { sub, outRoot: <root>/garden }（纯推导，不校验布局） */
+export function pathsForFile(src: string): { sub: string; outRoot: string } {
+  const sub = path.basename(path.dirname(src));
+  const sessionsRoot = path.dirname(path.dirname(src));
+  return { sub, outRoot: path.join(path.dirname(sessionsRoot), "garden") };
+}
+
 export function collectJobs(input: string): { jobs: Job[]; defaultOut: string } {
   const st = statSync(input);
   if (st.isFile()) {
-    // .../sessions/<sub>/<file>.jsonl → garden 与 sessions 同级
-    const sub = path.basename(path.dirname(input));
-    const sessionsRoot = path.dirname(path.dirname(input));
-    return { jobs: [{ src: input, sub }], defaultOut: path.join(path.dirname(sessionsRoot), "garden") };
+    const { sub, outRoot } = pathsForFile(input);
+    return { jobs: [{ src: input, sub }], defaultOut: outRoot };
   }
   const jobs: Job[] = [];
   for (const d of readdirSync(input, { withFileTypes: true })) {

@@ -8,11 +8,15 @@ garden 是单向的格式转换器：pi 的 session jsonl → 三级 markdown �
 ┌────────────────────────────────────────────────────────────┐
 │ pi (coding agent)                                          │
 │   持续追加 ~/.pi/agent/sessions/--<cwd 转义>--/*.jsonl      │
+│      │                                                     │
+│      └─ extensions/garden.ts（pi 扩展，会话事件触发）        │
+│         session_start / agent_settled(防抖) /              │
+│         session_compact / session_shutdown / /garden       │
 └────────────────────────────────────────────────────────────┘
                      │  （sessions 在本机是软链 → /mnt/d/sd/_pi/sessions）
                      ▼
 ┌────────────────────────────────────────────────────────────┐
-│ garden CLI（src/cli.ts）                                    │
+│ garden 转换核心（src/cli.ts，CLI 与扩展共用）                │
 │                                                            │
 │   collectJobs    扫描 sessions 目录（子目录/*.jsonl，一层） │
 │   processFile    每个 session:                              │
@@ -36,6 +40,7 @@ garden 是单向的格式转换器：pi 的 session jsonl → 三级 markdown �
 
 | 模块 | 职责 |
 |------|------|
+| `extensions/garden.ts` | pi 扩展适配层：事件接线、防抖、`/garden` 命令；渲染全部委托 src/ |
 | `src/cli.ts` | 参数、目录扫描、增量判断、写盘 |
 | `src/parser.ts` | jsonl → Entry[]；容忍 append 到一半的残缺末行 |
 | `src/types.ts` | session-format v3 的全部 entry / message 类型 |
@@ -58,4 +63,5 @@ garden 是单向的格式转换器：pi 的 session jsonl → 三级 markdown �
 
 - `collectJobs` 只扫一层子目录；sessions 下的嵌套目录（如 `.mono/`，约 67 个文件）
   不会被转换（2026-09-14 发现，待决策是否递归）。
-- 未来方向（未实现）：接入 pi 扩展在 session 保存时自动转换、watch 模式。
+- 扩展只转换**当前会话**的文件；全量回填用 CLI 或 `/garden all`。
+- 未来方向（未实现）：watch 模式（脱离 pi 生命周期的独立守护）。

@@ -20,6 +20,7 @@ garden（pi-session-manager）的内部技术文档，仿 Kubernetes 文档范�
 - 调整截断预算的标准流程：[tune-budget](tasks/tune-budget.md)
 - pi 新增 entry 类型时的跟进：[add-entry-type](tasks/add-entry-type.md)
 - 输出 md 的格式字典（frontmatter / 节标题 / marker）：[output-format](reference/output-format.md)
+- pi 扩展的触发点与配置：[extension](reference/extension.md)
 - 预算常量表：[constants](reference/constants.md)
 
 ## 规则

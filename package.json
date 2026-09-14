@@ -1,9 +1,10 @@
 {
   "name": "pi-session-manager",
-  "version": "0.1.2",
-  "description": "garden: 把 pi 的 session 记录 (.jsonl) 转换为三级可读 markdown (l0/l1/l2)",
+  "version": "0.2.0",
+  "description": "garden: 把 pi 的 session 记录 (.jsonl) 转换为三级可读 markdown (l0/l1/l2)，CLI + pi 扩展双形态",
   "type": "module",
   "private": true,
+  "keywords": ["pi-package"],
   "bin": {
     "garden": "src/cli.ts"
   },
@@ -12,7 +13,13 @@
   },
   "scripts": {
     "garden": "node src/cli.ts",
-    "test": "node --test test/render.test.ts test/truncate.test.ts test/cli.test.ts"
+    "test": "node --test test/render.test.ts test/truncate.test.ts test/cli.test.ts test/extension.test.ts"
+  },
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
   },
   "license": "MIT"
 }

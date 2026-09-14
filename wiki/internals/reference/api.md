@@ -51,5 +51,15 @@
 | 导出 | 说明 |
 |------|------|
 | `collectJobs(input) => { jobs, defaultOut }` | 扫描 sessions 目录 |
+| `pathsForFile(src) => { sub, outRoot }` | 单文件路径推导：`.../sessions/<sub>/<file>.jsonl` → `<root>/garden`（纯推导，不校验布局） |
 | `processFile(src, sub, outRoot) => { written, skipped }` | 转换单个 session（含增量判断） |
 | `isUpToDate(outPath, srcMtime) => boolean` | mtime + 版本标记双重判断 |
+
+## extensions/garden.ts（pi 扩展）
+
+| 导出 | 说明 |
+|------|------|
+| `default (pi: ExtensionAPI) => void` | pi 扩展入口：事件接线（触发点与配置见 wiki/internals/reference/extension.md） |
+| `readConfig(env) => GardenConfig` | 读 `PI_GARDEN*` 环境变量 |
+| `gardenPathsFor(sessionFile) => { sub, outRoot } \| null` | `pathsForFile` + 标准 sessions 布局校验 |
+| `convertSessionFile(sessionFile) => { written, skipped } \| null` | 转换单个 session；布局不合或文件不存在返回 null |

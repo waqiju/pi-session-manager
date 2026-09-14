@@ -5,6 +5,7 @@
 | 页面 | 内容 |
 |------|------|
 | [cli](cli.md) | garden CLI：参数、默认值、退出码、增量语义 |
+| [extension](extension.md) | pi 扩展：安装、触发点、`/garden` 命令、`PI_GARDEN*` 配置 |
 | [api](api.md) | `src/` 导出函数字典 |
 | [constants](constants.md) | 预算常量、`GARDEN_VERSION`、`DETAILS_DROP_TOOLS` |
 | [output-format](output-format.md) | 输出 markdown 的格式字典：frontmatter、节标题、marker |

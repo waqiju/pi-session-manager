@@ -17,6 +17,19 @@ node src/cli.ts <xxx.jsonl>        # 单文件模式
 `npm link` 之后可直接用 `garden` 命令。增量转换：源文件更新或渲染逻辑版本变化时
 才重新生成。
 
+## pi 扩展（自动转换）
+
+本仓库同时是 pi package（`extensions/garden.ts`），装入 pi 后在会话生命周期内自动转换
+当前 session：启动补漏 → agent 空闲防抖 live 转换 → compaction / 退出时终态落盘。
+
+```bash
+pi install /path/to/pi-session-manager      # 本地路径（开发期，/reload 即生效）
+pi install https://github.com/waqiju/pi-session-manager   # git package
+```
+
+扩展内手动命令：`/garden`（转换当前 session）、`/garden all`（全量回填）。
+触发点与 `PI_GARDEN*` 环境变量配置见 [extension 参考](wiki/internals/reference/extension.md)。
+
 ## 三级输出
 
 | 级别 | 定位 |
