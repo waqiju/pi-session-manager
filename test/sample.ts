@@ -15,6 +15,9 @@ export const FINAL_TEXT_T2 = "好的，换个思路来做。";
 export const FINAL_TEXT_T3 = "最终回答：全部搞定。";
 export const USER_PROMPT_1 = "请读取 package.json 并总结";
 export const COMPACTION_SUMMARY = "## Goal\n测试压缩摘要：用户在做 garden 工具开发。";
+export const EDIT_DIFF = "   27   <path class=\"fold\" d=\"M 396 118 L 248 252\"/>\n- 31   <circle class=\"eye\" cx=\"368\" cy=\"136\" r=\"4.5\"/>\n+ 31   <circle class=\"eye\" cx=\"340\" cy=\"161\" r=\"4\"/>\n 32 </svg>";
+/** read 被截断时 details.truncation.content 是 content.text 的重复副本（冗余） */
+export const READ_TRUNCATION_CONTENT = "x".repeat(3000);
 
 export function buildSample(): { header: Record<string, unknown>; entries: Record<string, unknown>[] } {
   seq = 0;
@@ -76,6 +79,7 @@ export function buildSample(): { header: Record<string, unknown>; entries: Recor
       toolCallId: "read:0",
       toolName: "read",
       content: [{ type: "text", text: LONG_RESULT }],
+      details: { truncation: { content: READ_TRUNCATION_CONTENT, truncated: true, totalLines: 1000, outputLines: 20 } },
       isError: false,
       timestamp: ts,
     },
@@ -122,13 +126,52 @@ export function buildSample(): { header: Record<string, unknown>; entries: Recor
     id: id(),
     parentId: eA3.id,
     timestamp: time(),
-    message: { role: "toolResult", toolCallId: "bash:0", toolName: "bash", content: [{ type: "text", text: "boom error" }], isError: true, timestamp: ts },
+    message: {
+      role: "toolResult",
+      toolCallId: "bash:0",
+      toolName: "bash",
+      content: [{ type: "text", text: "boom error" }],
+      details: {}, // 空 details：任何级别都不渲染
+      isError: true,
+      timestamp: ts,
+    },
+  };
+
+  // edit 工具的 toolResult：details 含 diff/patch（独有信息），L1 保留
+  const eEditCall = {
+    type: "message",
+    id: id(),
+    parentId: eR3.id,
+    timestamp: time(),
+    message: {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "edit:0", name: "edit", arguments: { path: "/tmp/proj/a.svg", oldText: "x", newText: "y" } }],
+      model: "kimi-k3",
+      stopReason: "toolUse",
+      timestamp: ts,
+    },
+  };
+
+  const eEditResult = {
+    type: "message",
+    id: id(),
+    parentId: eEditCall.id,
+    timestamp: time(),
+    message: {
+      role: "toolResult",
+      toolCallId: "edit:0",
+      toolName: "edit",
+      content: [{ type: "text", text: "Successfully replaced 1 block(s) in a.svg" }],
+      details: { diff: EDIT_DIFF, patch: "--- a.svg\n+++ b.svg\n@@ -27,6 +27,6 @@", firstChangedLine: 31 },
+      isError: false,
+      timestamp: ts,
+    },
   };
 
   const eA4 = {
     type: "message",
     id: id(),
-    parentId: eR3.id,
+    parentId: eEditResult.id,
     timestamp: time(),
     message: {
       role: "assistant",
@@ -219,7 +262,7 @@ export function buildSample(): { header: Record<string, unknown>; entries: Recor
     header,
     entries: [
       eModelChange, eThinkLevel, eName, eUser1, eA1, eR1, eA2, eR2, eA3, eR3,
-      eA4, eUser2, eBranchSummary, eA5, eBashExec, eCustom, eCustomMsg, eLabel,
+      eEditCall, eEditResult, eA4, eUser2, eBranchSummary, eA5, eBashExec, eCustom, eCustomMsg, eLabel,
       eCompaction, eUser3, eA6,
     ],
   };

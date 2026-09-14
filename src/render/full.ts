@@ -7,11 +7,13 @@ import type {
   ToolResultMessage,
 } from "../types.ts";
 import {
+  DETAILS_DROP_TOOLS,
   branchNote,
   fence,
   fmtTime,
   frontmatter,
   imagePlaceholder,
+  isEmptyDetails,
   truncateHeadTail,
   truncateLongStrings,
   type RenderOptions,
@@ -163,9 +165,13 @@ function renderToolResult(msg: ToolResultMessage, time: string, truncate: boolea
       }
     }
   }
-  if (msg.details != null) {
-    const details = truncate ? truncateLongStrings(msg.details) : msg.details;
-    parts.push(`**details:**`, "", fence(JSON.stringify(details, null, 2), "json"));
+  if (msg.details != null && !isEmptyDetails(msg.details)) {
+    // 方案 B: L1 丢弃输出型工具（bash/read/write/grep/...）的 details（纯冗余，text 已含全部信息）；
+    // edit 等含独有信息（diff/patch）的工具保留全量。空 details 任何级别都不渲染。
+    const drop = truncate && DETAILS_DROP_TOOLS.has(msg.toolName ?? "");
+    if (!drop) {
+      parts.push(`**details:**`, "", fence(JSON.stringify(msg.details, null, 2), "json"));
+    }
   }
   return parts.join("\n\n");
 }

@@ -6,10 +6,12 @@ import { renderL1 } from "../src/render/l1.ts";
 import { renderL2 } from "../src/render/l2.ts";
 import {
   COMPACTION_SUMMARY,
+  EDIT_DIFF,
   FINAL_TEXT_T1,
   FINAL_TEXT_T2,
   FINAL_TEXT_T3,
   INTERMEDIATE_TEXT,
+  READ_TRUNCATION_CONTENT,
   THINKING_TEXT,
   USER_PROMPT_1,
   buildSample,
@@ -23,12 +25,15 @@ const OPTS = { sourceName: "sample.jsonl" };
 test("parser: header + entries 数量", () => {
   assert.equal(parsed.header?.id, "test-session-uuid");
   assert.equal(parsed.header?.cwd, "/tmp/proj");
-  assert.equal(parsed.entries.length, 21);
+  assert.equal(parsed.entries.length, 23);
 });
+
+// 新增：toolCall 数量变了（+edit:0），L2 工具行断言也要加；entries 数量 23
+const TOOL_LINE_EDIT = "- 🔧 **edit** `/tmp/proj/a.svg`";
 
 test("parser: 容忍残缺末行", () => {
   const p = parseSessionText(buildSampleJsonl() + '{"type":"message","id":"broken"');
-  assert.equal(p.entries.length, 21);
+  assert.equal(p.entries.length, 23);
 });
 
 const l0 = renderL0(parsed.header, parsed.entries, OPTS);
@@ -50,7 +55,6 @@ test("L0: 全量保留", () => {
   assert.ok(l0.includes("💻 Bash"), "bashExecution 渲染");
   assert.ok(l0.includes("❌"), "isError 标记");
 });
-
 test("L0 frontmatter", () => {
   assert.ok(l0.startsWith("---\n"));
   assert.ok(l0.includes('level: "l0"'));
@@ -59,8 +63,8 @@ test("L0 frontmatter", () => {
   assert.ok(l0.includes('name: "garden 开发会话"'));
   assert.ok(l0.includes('- "kimi-k3"'));
   assert.ok(l0.includes("user: 3"));
-  assert.ok(l0.includes("assistant: 6"));
-  assert.ok(l0.includes("toolResult: 3"));
+  assert.ok(l0.includes("assistant: 7"));
+  assert.ok(l0.includes("toolResult: 4"));
   // tokens: 1100 + 2200 + 150(compaction)
   assert.ok(l0.includes("total: 3450"));
   assert.ok(l0.includes("cost_total: 2.01"));
@@ -92,8 +96,22 @@ test("L2: 骨架", () => {
   assert.ok(l2.includes("- 🔧 **read** `/tmp/proj/package.json`"), "read 一行摘要");
   assert.ok(l2.includes("- 🔧 **write** `/tmp/proj/big.txt`"), "write 一行摘要");
   assert.ok(l2.includes("- 🔧 **bash** `ls -la /tmp/proj` ❌"), "报错工具行带 ❌");
+  assert.ok(l2.includes(TOOL_LINE_EDIT), "edit 一行摘要");
   assert.ok(l2.includes(COMPACTION_SUMMARY), "compaction summary 保留");
   assert.ok(l2.includes("跳回分支点"), "分支提示保留");
+});
+
+test("方案B: details 策略", () => {
+  // L0: read(冗余副本) 和 edit(diff) 的 details 都全量保留
+  assert.ok(l0.includes(READ_TRUNCATION_CONTENT), "L0 read details 冗余副本保留");
+  assert.ok(l0.includes("firstChangedLine"), "L0 edit details 保留");
+  // L1: read(输出型) details 丢弃；edit 保留全量；空 details 不渲染
+  assert.ok(!l1.includes(READ_TRUNCATION_CONTENT), "L1 read details 丢弃");
+  assert.ok(!l1.includes("truncation"), "L1 无 truncation 键");
+  assert.ok(l1.includes("firstChangedLine"), "L1 edit details 保留");
+  // 空 details（bash {}）任何级别都不渲染
+  assert.ok(!l0.includes("**details:**\n\n\n\n```json\n{}"), "L0 不渲染空 details");
+  assert.ok(!l1.includes("**details:**\n\n\n\n```json\n{}"), "L1 不渲染空 details");
 });
 
 test("L2: 工具行在最终答复之前", () => {

@@ -30,7 +30,7 @@ node src/cli.ts ... -o <输出目录>  # 自定义输出
 | assistant text | 全量 | 全量 | 每轮最后一条含 text 的 assistant 消息 |
 | thinking | 全量 | 全量 | 丢弃 |
 | toolCall | args 完整 JSON | args 中 >2000 字符的字符串头尾截断 | 一行摘要 `- 🔧 **bash** \`ls\``，报错加 ❌ |
-| toolResult | 全量 | 头 1500 + 尾 500，中间 `... (省略 N 字符) ...` | 丢弃 |
+| toolResult | 全量（含 details） | 头 1500 + 尾 500，中间 `... (省略 N 字符) ...`；bash/read/write 等的 details 丢弃（与 text 冗余），edit 的 diff/patch 保留 | 丢弃 |
 | compaction / branch_summary | 全量 | 全量 | 保留 summary |
 | model_change / label / custom 等 | 保留 | 保留 | 忽略（session 名进 frontmatter） |
 | 图片 | 占位符 | 占位符 | 丢弃 |

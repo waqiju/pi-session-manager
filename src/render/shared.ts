@@ -52,10 +52,26 @@ export function truncateLongStrings(value: unknown, limit = TRUNC_ARG_LIMIT): un
   return value;
 }
 
-/** base64 图片 → 占位符 */
+/** 图片 base64 → 占位符 */
 export function imagePlaceholder(mimeType: string, data: string): string {
   const bytes = Math.round((data?.length ?? 0) * 0.75);
   return `*[image: ${mimeType}, ${fmtBytes(bytes)}]*`;
+}
+
+/**
+ * L1 丢弃 details 的工具（输出型工具）：
+ * 它们的 details 要么是空对象，要么是 content.text 的重复副本 + 文本里已含的
+ * fullOutputPath（pi 源码 output-accumulator/read 实现确认），无独有信息。
+ * 未知工具保守保留（details 可能是独有信息）。
+ */
+export const DETAILS_DROP_TOOLS = new Set(["bash", "read", "write", "grep", "ls", "find", "powershell", "glob"]);
+
+/** details 是否为空（null / 空对象 / 空数组）→ 无渲染价值 */
+export function isEmptyDetails(d: unknown): boolean {
+  if (d == null) return true;
+  if (Array.isArray(d)) return d.length === 0;
+  if (typeof d === "object") return Object.keys(d as object).length === 0;
+  return false;
 }
 
 /**
