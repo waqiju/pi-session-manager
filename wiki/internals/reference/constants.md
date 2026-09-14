@@ -22,7 +22,7 @@
 
 | 常量 | 当前值 | 语义 |
 |------|--------|------|
-| `GARDEN_VERSION` | `"0.5.0"` | 渲染行为版本。写入 frontmatter `version`；增量判断要求输出文件的 version 与之一致，否则重新生成 |
+| `GARDEN_VERSION` | `"0.6.0"` | 渲染行为版本。写入 frontmatter `version`；增量判断要求输出文件的 version 与之一致，否则重新生成 |
 
 版本历史：
 - `0.2.0` 引入版本标记与 details 丢弃策略
@@ -30,6 +30,8 @@
 - `0.4.x` inline 级截断、永不硬切、JSON 物理行封顶、`INLINE_MIN_OMIT` 64
 - `0.5.0` details 块渲染（diff/patch 不再转义单行，L1 patch 优先去重）；
   l2 turn 编号 + 轮级耗时/output tokens
+- `0.6.0` l2：assistant text 全量保留（按序交织，原为只留每轮最后一条）；
+  thinking 改为占位段落（原为丢弃）；节标题时间改为轮内首条 assistant
 
 ## details 丢弃名单（src/render/shared.ts）
 

@@ -4,21 +4,24 @@ import { branchNote, fmtTime, frontmatter, type RenderOptions } from "./shared.t
 /**
  * L2：骨架视图，只留最关键的信息。
  *  - user prompt 全量（带 turn 编号）
- *  - 每一轮（user → 下一个 user 之间）只保留最后一条含 text 的 assistant 消息
- *    （标题行附轮级统计：⏱ 耗时 + output tokens）
- *  - 工具调用保留一行摘要（🔧），报错的结果追加 ❌
+ *  - assistant text 全量保留（2026-09-14 决策：中间 text 虽短但承上启下），
+ *    按时间序与工具行交织；每轮一个 assistant 节（标题 = 轮内首条 assistant
+ *    的时间/模型 + 轮级统计：⏱ 耗时 + output tokens）
+ *  - thinking 只留占位段落 `**🧠 Thinking**`（表示模型在此思考过），内容丢弃
+ *  - 工具调用保留一行摘要（🔧），连续的并为一组 list，报错的结果追加 ❌
  *  - compaction / branch_summary 的 summary 保留
- *  - thinking / toolResult 内容 / 图片 丢弃
+ *  - toolResult 内容 / 图片 丢弃
  */
 export function renderL2(header: SessionHeader | null, entries: Entry[], opts: RenderOptions = {}): string {
   const out: string[] = [frontmatter(header, entries, "l2", opts.sourceName)];
 
-  // 当前轮的 tool 摘要行缓冲区：凑成一组 markdown list 再落盘
-  let toolBuf: string[] = [];
-  // toolCallId → toolBuf 下标，用于报错时回补 ❌
+  // 当前轮的内容项（按到达顺序）：tool = 工具摘要行（落盘时连续的并为一组 list）；
+  // block = 独立段落（text / thinking 占位）
+  let turnItems: { kind: "tool" | "block"; text: string }[] = [];
+  // toolCallId → turnItems 下标，用于报错时回补 ❌
   let toolIdx = new Map<string, number>();
-  // 当前轮最后一条含 text 的 assistant 消息（缓冲，遇到下一条 user 时才落盘）
-  let pendingText: { text: string; time: string; model?: string } | null = null;
+  // 轮内首条 assistant 消息的时间/模型（节标题用）
+  let sectionMeta: { time: string; model?: string } | null = null;
 
   // turn 统计（user → 下一个 user）：编号、耗时（轮内最后 entry − user entry）、output tokens
   let turnNo = 0;
@@ -48,27 +51,40 @@ export function renderL2(header: SessionHeader | null, entries: Entry[], opts: R
     return parts.join(" · ");
   };
 
-  const flushTools = () => {
-    if (toolBuf.length) out.push(toolBuf.join("\n"));
-    toolBuf = [];
-    toolIdx = new Map();
-  };
-  const flushText = () => {
-    const stats = takeTurnStats();
-    if (pendingText) {
-      out.push(
-        `## 🤖 Assistant · ${pendingText.time}${pendingText.model ? ` · ${pendingText.model}` : ""}${stats ? ` · ${stats}` : ""}\n\n${pendingText.text}`,
-      );
-      pendingText = null;
-    } else if (stats) {
-      // 一轮没有含 text 的 assistant（全工具调用后结束）：统计退化为独立 meta 行
-      out.push(`> ${stats}`);
+  // 轮落盘：连续 tool 行并为一组 list，block 段落原样；有 assistant 则加节标题
+  const flushTurn = () => {
+    const parts: string[] = [];
+    let toolRun: string[] = [];
+    const flushRun = () => {
+      if (toolRun.length) parts.push(toolRun.join("\n"));
+      toolRun = [];
+    };
+    for (const item of turnItems) {
+      if (item.kind === "tool") toolRun.push(item.text);
+      else {
+        flushRun();
+        parts.push(item.text);
+      }
     }
+    flushRun();
+    turnItems = [];
+    toolIdx = new Map();
+
+    const stats = takeTurnStats();
+    if (!parts.length) {
+      // 轮内无可见内容（如 assistant 空 content）：统计退化为独立 meta 行
+      if (stats) out.push(`> ${stats}`);
+    } else if (sectionMeta) {
+      const head = `## 🤖 Assistant · ${sectionMeta.time}${sectionMeta.model ? ` · ${sectionMeta.model}` : ""}${stats ? ` · ${stats}` : ""}`;
+      out.push(`${head}\n\n${parts.join("\n\n")}`);
+    } else {
+      // 无 assistant（如只有 bashExecution）：裸内容 + 统计 meta 行
+      out.push(parts.join("\n\n"));
+      if (stats) out.push(`> ${stats}`);
+    }
+    sectionMeta = null;
   };
-  const flushAll = () => {
-    flushTools();
-    flushText();
-  };
+  const flushAll = flushTurn;
 
   let prev: Entry | null = null;
   for (const entry of entries) {
@@ -114,16 +130,17 @@ export function renderL2(header: SessionHeader | null, entries: Entry[], opts: R
           turnOut += u.output ?? 0;
           turnHasUsage = true;
         }
-        const texts: string[] = [];
+        if (!sectionMeta) sectionMeta = { time, model: msg.model };
         for (const part of msg.content ?? []) {
-          if (part.type === "toolCall") {
-            toolIdx.set(part.id, toolBuf.length);
-            toolBuf.push(summarizeToolCall(part.name, part.arguments));
+          if (part.type === "thinking" && part.thinking?.trim()) {
+            turnItems.push({ kind: "block", text: "**🧠 Thinking**" });
+          } else if (part.type === "toolCall") {
+            toolIdx.set(part.id, turnItems.length);
+            turnItems.push({ kind: "tool", text: summarizeToolCall(part.name, part.arguments) });
           } else if (part.type === "text" && part.text?.trim()) {
-            texts.push(part.text);
+            turnItems.push({ kind: "block", text: part.text });
           }
         }
-        if (texts.length) pendingText = { text: texts.join("\n\n"), time, model: msg.model };
         break;
       }
       case "toolResult": {
@@ -131,7 +148,7 @@ export function renderL2(header: SessionHeader | null, entries: Entry[], opts: R
         touchTurn(entry.timestamp);
         if (msg.isError) {
           const idx = toolIdx.get(msg.toolCallId);
-          if (idx != null) toolBuf[idx] += " ❌";
+          if (idx != null) turnItems[idx].text += " ❌";
           else {
             flushAll();
             out.push(`- ❌ **${msg.toolName}** 报错`);
@@ -144,7 +161,7 @@ export function renderL2(header: SessionHeader | null, entries: Entry[], opts: R
         touchTurn(entry.timestamp);
         let line = summarizeToolCall("bash", { command: msg.command });
         if (msg.exitCode) line += " ❌";
-        toolBuf.push(line);
+        turnItems.push({ kind: "tool", text: line });
         break;
       }
       default:

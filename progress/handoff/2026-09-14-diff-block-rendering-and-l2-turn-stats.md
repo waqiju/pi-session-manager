@@ -2,7 +2,7 @@
 
 - 日期：2026-09-14
 - 项目：garden（pi-session-manager）
-- 状态：已完成；对应代码状态 `GARDEN_VERSION = 0.5.0`
+- 状态：已完成；对应代码状态 `GARDEN_VERSION = 0.6.0`
 - 上一棒：[2026-09-14-l1-optimization-and-next-steps.md](2026-09-14-l1-optimization-and-next-steps.md)
 
 ## 1. 本轮完成
@@ -42,9 +42,23 @@
 用户判断：10 行折到 3 行不占大头，l2 体积大头在 user prompt 和 assistant text。
 （调查数据：54 个 l2 文件 ≥3 连 run 516 个，可省 ~2549 行——结论仍是收益不值得复杂度。）
 
+### ⑥ l2 text 全量 + thinking 占位（0.6.0，同日追加）
+
+用户复查 0.5.0 输出后提出两处调整：
+
+- **assistant text 全量保留**：原为每轮只留最后一条含 text 的消息。用户理由：从 l0 看，
+  中间 text 都很简短但承上启下，有助理解。现按时间序与工具行交织（连续的 tool 行仍并为一组
+  list）；每轮一个 assistant 节，标题时间/模型改为轮内**首条** assistant。
+- **thinking 占位**：原为丢弃。现保留占位段落 `**🧠 Thinking**`（内容仍丢弃），
+  表示模型在此思考过。
+
+实现：`l2.ts` 的 `toolBuf`+`pendingText` 双缓冲改为单一 `turnItems` 有序列表
+（tool/block 两类），flush 时连续 tool 并组；❌ 回补仍走 toolCallId → 下标。
+
 ## 2. 验证
 
-- `npm test`：30 个测试全过（新增 3 个：块渲染 L0/L1、无 patch 退化、turn 统计）
+- `npm test`：31 个测试全过（新增 4 个：块渲染 L0/L1、无 patch 退化、turn 统计、
+  thinking 占位与交织顺序）
 - 全量重生成（删 garden/ 后 `node src/cli.ts`，305 session）：抽查
   `~/.pi/agent/garden/--mnt-d-1_Workspace-bot_home--/2026-09-05T15-04-09-626Z_....md`
   l1 的 patch 红绿 diff 块、l2 的 `#N` 编号与 `⏱/out` 均正常
@@ -53,7 +67,7 @@
 
 - `wiki/internals/reference/output-format.md`：details 块渲染规则 + l2 turn 编号/统计
 - `wiki/internals/reference/constants.md`：版本历史加 0.5.0
-- `wiki/internals/concepts/lod-levels.md`：取舍表更新
+- `wiki/internals/concepts/lod-levels.md`：取舍表更新（l2 text 全量 / thinking 占位）
 - `wiki/internals/concepts/truncation.md`：JSON 物理行说明更新（details 多行值不再走 JSON）
 - `python3 scripts/check_wiki_links.py` 通过
 

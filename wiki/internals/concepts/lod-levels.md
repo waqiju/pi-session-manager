@@ -18,8 +18,8 @@ garden 把同一个 session 渲染成三级 markdown，类似 LOD（Level of Det
 | 内容 | l0 | l1 | l2 |
 |------|----|----|----|
 | user prompt | 全量 | 全量 | 全量（带 turn 编号 `#N`） |
-| assistant text | 全量 | 全量 | 每轮最后一条含 text 的 assistant 消息（标题带轮级耗时/output tokens） |
-| thinking | 全量 | 截断（预算 1000） | 丢弃 |
+| assistant text | 全量 | 全量 | 全量（按时间序与工具行交织；每轮一个节，标题带轮级耗时/output tokens） |
+| thinking | 全量 | 截断（预算 1000） | 占位段落 `**🧠 Thinking**`（内容丢弃） |
 | toolCall | args 完整 JSON | args 中超长字符串截断（预算 800） | 一行摘要 `- 🔧 **bash** \`ls\``，报错加 ❌ |
 | toolResult | 全量（details 块渲染） | 文本截断（预算 1000）；bash/read/write 等 details 丢弃，edit 的 diff/patch 渲染为围栏块（patch 优先，预算 4000） | 丢弃 |
 | compaction / branch_summary | 全量 | 全量 | 保留 summary |

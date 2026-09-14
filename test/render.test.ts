@@ -115,8 +115,8 @@ test("L2: 骨架", () => {
   assert.ok(l2.includes(FINAL_TEXT_T1), "轮1 最终答复保留");
   assert.ok(l2.includes(FINAL_TEXT_T2), "轮2 最终答复保留");
   assert.ok(l2.includes(FINAL_TEXT_T3), "轮3 最终答复保留");
-  assert.ok(!l2.includes(INTERMEDIATE_TEXT), "中间 assistant 消息丢弃");
-  assert.ok(!l2.includes("THINK_HEAD"), "thinking 丢弃");
+  assert.ok(l2.includes(INTERMEDIATE_TEXT), "中间 assistant text 保留（承上启下）");
+  assert.ok(!l2.includes("THINK_HEAD"), "thinking 内容丢弃");
   assert.ok(!l2.includes("HEAD_MARKER"), "toolResult 内容丢弃");
   assert.ok(l2.includes("- 🔧 **read** `/tmp/proj/package.json`"), "read 一行摘要");
   assert.ok(l2.includes("- 🔧 **write** `/tmp/proj/big.txt`"), "write 一行摘要");
@@ -181,12 +181,22 @@ test("L2: 工具行在最终答复之前", () => {
 test("L2: turn 编号 + 轮级耗时/output tokens（2026-09-14）", () => {
   assert.ok(l2.includes("## 👤 User · #1 · 01:00:04"), "user 头带 turn 编号");
   assert.ok(l2.includes("## 👤 User · #3 · 01:00:22"), "compaction 后编号连续");
-  // 轮1：eUser1(04s) → eA4(13s) = 9s；usage.output = 100 + 200 = 300
-  assert.ok(l2.includes("## 🤖 Assistant · 01:00:13 · kimi-k3 · ⏱ 9s · out 300"), "轮1 耗时+token");
+  // 轮1：eUser1(04s) → eA4(13s) = 9s；usage.output = 100 + 200 = 300；标题时间 = 轮内首条 assistant(eA1, 05s)
+  assert.ok(l2.includes("## 🤖 Assistant · 01:00:05 · kimi-k3 · ⏱ 9s · out 300"), "轮1 耗时+token");
   // 轮2：eUser2(14s) → eBashExec(17s) = 3s；无 usage → 不显 out
   assert.ok(l2.includes("## 🤖 Assistant · 01:00:16 · kimi-k3 · ⏱ 3s\n"), "轮2 只显耗时");
   // 轮3：eUser3(22s) → eA6(23s) = 1s
   assert.ok(l2.includes("## 🤖 Assistant · 01:00:23 · kimi-k3 · ⏱ 1s\n"), "轮3 只显耗时");
+});
+
+test("L2: thinking 占位 + text 与工具按序交织（2026-09-14）", () => {
+  assert.ok(l2.includes("**🧠 Thinking**"), "thinking 占位保留");
+  // 顺序：thinking 占位 → 中间 text → 工具行 → 最终 text
+  const iThink = l2.indexOf("**🧠 Thinking**");
+  const iMid = l2.indexOf(INTERMEDIATE_TEXT);
+  const iTool = l2.indexOf("- 🔧 **read**");
+  const iFinal = l2.indexOf(FINAL_TEXT_T1);
+  assert.ok(iThink > -1 && iThink < iMid && iMid < iTool && iTool < iFinal, "占位→中间text→工具→最终text 按序");
 });
 
 test("渲染确定性：两次结果一致", () => {
