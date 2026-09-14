@@ -1,6 +1,6 @@
 {
   "name": "pi-session-manager",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "garden: 把 pi 的 session 记录 (.jsonl) 转换为三级可读 markdown (l0/l1/l2)，CLI + pi 扩展双形态",
   "type": "module",
   "private": true,
@@ -13,7 +13,7 @@
   },
   "scripts": {
     "garden": "node src/cli.ts",
-    "test": "node --test test/render.test.ts test/truncate.test.ts test/cli.test.ts test/extension.test.ts"
+    "test": "node --test test/render.test.ts test/truncate.test.ts test/cli.test.ts test/extension.test.ts test/session-list.test.ts test/open.test.ts"
   },
   "pi": {
     "extensions": ["./extensions"]

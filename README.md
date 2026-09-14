@@ -27,7 +27,8 @@ pi install /path/to/pi-session-manager      # 本地路径（开发期，/reload
 pi install https://github.com/waqiju/pi-session-manager   # git package
 ```
 
-扩展内手动命令：`/garden`（转换当前 session）、`/garden all`（全量回填）。
+扩展内命令：`/garden`（快速 session 选择器，等位 /resume 但只读文件头，慢盘友好）、
+`/gardener-output`（转换当前 session，`all` 全量回填）、`/gardener-open [lN]`（浏览器打开 md）。
 触发点与 `PI_GARDEN*` 环境变量配置见 [extension 参考](wiki/internals/reference/extension.md)。
 
 ## 三级输出

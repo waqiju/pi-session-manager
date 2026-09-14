@@ -153,7 +153,7 @@ test("扩展: PI_GARDEN=0 完全停用", () => {
   });
 });
 
-test("扩展: /garden 与 /garden all 命令", async () => {
+test("扩展: /gardener-output 与 /gardener-output all 命令", async () => {
   const { root, sessionFile } = setup();
   try {
     await withEnv({}, async () => {
@@ -161,7 +161,7 @@ test("扩展: /garden 与 /garden all 命令", async () => {
       garden(pi as any);
       const logs: string[] = [];
       const ctx = mockCtx(sessionFile, logs);
-      const cmd = commands.get("garden")!;
+      const cmd = commands.get("gardener-output")!;
       await cmd.handler("", ctx);
       assert.ok(logs.at(-1)?.includes("已更新"), logs.join());
 
@@ -170,6 +170,55 @@ test("扩展: /garden 与 /garden all 命令", async () => {
 
       await cmd.handler("all", ctx);
       assert.ok(logs.at(-1)?.includes("garden all: 1 个 session"), logs.join());
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("扩展: /gardener-open 转换后打开最高级别 + 级别参数校验", async () => {
+  const { root, sessionFile } = setup();
+  try {
+    await withEnv({ PI_GARDEN_OPEN_CMD: "true" }, async () => {
+      const { pi, commands } = mockPi();
+      garden(pi as any);
+      const logs: string[] = [];
+      const ctx = mockCtx(sessionFile, logs);
+      const cmd = commands.get("gardener-open")!;
+
+      await cmd.handler("l9", ctx); // 非法级别
+      assert.ok(logs.at(-1)?.includes("未知级别"), logs.join());
+
+      await cmd.handler("", ctx); // 无产物 → 先转换 → 打开 l2
+      assert.ok(logs.at(-1)?.includes("已打开"), logs.join());
+      assert.ok(logs.at(-1)?.includes(".l2.md"), logs.join());
+
+      await cmd.handler("l0", ctx); // 指定级别
+      assert.ok(logs.at(-1)?.includes(".l0.md"), logs.join());
+
+      await cmd.handler("l3", ctx); // 指定级别不存在（转换不产出 l3）
+      assert.ok(logs.at(-1)?.includes("无 l3 的输出文件"), logs.join());
+
+      // ephemeral session
+      await cmd.handler("", mockCtx(undefined, logs));
+      assert.ok(logs.at(-1)?.includes("无 session 文件"), logs.join());
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("扩展: /garden 选择器在无 UI 模式下告警且不加载 pi 包", async () => {
+  const { root, sessionFile } = setup();
+  try {
+    await withEnv({}, async () => {
+      const { pi, commands } = mockPi();
+      garden(pi as any);
+      const logs: string[] = [];
+      const ctx = mockCtx(sessionFile, logs);
+      ctx.hasUI = false; // print 模式：guard 生效则静默返回；若误走到动态 import pi 包会直接拋错
+      await commands.get("garden")!.handler("", ctx);
+      assert.equal(logs.length, 0, "无 UI 时静默返回（不加载 pi 包）");
     });
   } finally {
     rmSync(root, { recursive: true, force: true });

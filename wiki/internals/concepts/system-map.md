@@ -40,7 +40,9 @@ garden 是单向的格式转换器：pi 的 session jsonl → 三级 markdown �
 
 | 模块 | 职责 |
 |------|------|
-| `extensions/garden.ts` | pi 扩展适配层：事件接线、防抖、`/garden` 命令；渲染全部委托 src/ |
+| `extensions/garden.ts` | pi 扩展适配层：转换事件接线、`/garden` 快速选择器、`/gardener-output`、`/gardener-open`；逻辑全部委托 src/ |
+| `src/session-list.ts` | `/garden` 选择器数据源：头部快读 + garden frontmatter 富化（见 wiki/internals/reference/extension.md） |
+| `src/open.ts` | gardener-open：级别选择、平台检测、打开命令 |
 | `src/cli.ts` | 参数、目录扫描、增量判断、写盘 |
 | `src/parser.ts` | jsonl → Entry[]；容忍 append 到一半的残缺末行 |
 | `src/types.ts` | session-format v3 的全部 entry / message 类型 |
