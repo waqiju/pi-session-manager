@@ -22,12 +22,14 @@
 
 | 常量 | 当前值 | 语义 |
 |------|--------|------|
-| `GARDEN_VERSION` | `"0.4.3"` | 渲染行为版本。写入 frontmatter `version`；增量判断要求输出文件的 version 与之一致，否则重新生成 |
+| `GARDEN_VERSION` | `"0.5.0"` | 渲染行为版本。写入 frontmatter `version`；增量判断要求输出文件的 version 与之一致，否则重新生成 |
 
 版本历史：
 - `0.2.0` 引入版本标记与 details 丢弃策略
 - `0.3.0` line 级截断（6:4 整行）+ thinking 截断
 - `0.4.x` inline 级截断、永不硬切、JSON 物理行封顶、`INLINE_MIN_OMIT` 64
+- `0.5.0` details 块渲染（diff/patch 不再转义单行，L1 patch 优先去重）；
+  l2 turn 编号 + 轮级耗时/output tokens
 
 ## details 丢弃名单（src/render/shared.ts）
 
@@ -36,3 +38,7 @@
 L1 中这些输出型工具的 toolResult.details 被丢弃（纯冗余：内容已在 text 中）。
 `edit` 等工具的 details 含独有信息（diff/patch），保留（受 `DETAILS_BUDGET` 截断）。
 空 details（null / `{}` / `[]`）任何级别都不渲染。未知工具保守保留。
+
+保留的 details 以块渲染（见 wiki/internals/reference/output-format.md）：
+多行字符串值渲染为围栏块（patch 用 ```diff），标量并入头行；
+L1 中 patch 存在时跳过等价的 diff 字段。

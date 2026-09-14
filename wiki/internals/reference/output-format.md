@@ -70,14 +70,24 @@ assistant 消息内：`thinking` 渲染为 `**🧠 Thinking:**` + 围栏代码�
 
 - 图片一律渲染为占位符：`*[image: image/png, 83KB]*`
 - 代码围栏自适应：内容含 ``` 时自动升级为更多反引号，markdown 不会炸
-- toolResult 的 details：L1 丢弃输出型工具（名单见 wiki/internals/reference/constants.md），
-  edit 等的 diff/patch 保留
+- toolResult 的 details：L1 丢弃输出型工具（名单见 wiki/internals/reference/constants.md）；
+  保留的 details 按字段分形态渲染：
+  - 多行字符串值（典型：edit 的 `diff`/`patch`）→ 围栏块（真实换行，非转义 JSON 单行），
+    `patch` 用 ```diff 高亮，其余用 ```text
+  - 嵌套对象/数组 → JSON 围栏块；标量并入头行 `**details:** (firstChangedLine: 31)`
+  - L1 去重：`patch` 存在时跳过等价的 `diff`（同一修改的两种表示；
+    diff 的绝对行号仍可翻 l0）
 
 ## l2 结构差异
 
 - 只含：frontmatter、user prompt（全量）、每轮最后一条 assistant text、
   工具一行摘要（`- 🔧 **<tool>** \`<detail>\``，报错行尾加 ❌）、
   compaction / branch_summary 的 summary、分支提示
+- user 节标题带 turn 编号：`## 👤 User · #N · HH:MM:SS`（compaction 不重置）
+- assistant 节标题带轮级统计：`## 🤖 Assistant · HH:MM:SS · <model> · ⏱ 45s · out 5.3k`
+  - 耗时 = 轮内最后一个 assistant/toolResult/bashExecution − user 消息起点（墙钟，不含轮间间隔）
+  - `out` = 轮内 assistant usage.output 求和（紧凑格式：300 / 5.3k / 1.2M）；无 usage 不显
+  - 一轮无含 text 的 assistant 时，统计退化为独立行 `> ⏱ 45s · out 5.3k`
 - 工具摘要 detail：bash 取命令首行；read/write/edit 取 path；其余取 JSON 摘要；
   超 80 字符截断
 - 无 thinking、无 toolResult 内容、无图片

@@ -139,10 +139,54 @@ test("方案B: details 策略", () => {
   assert.ok(!l1.includes("**details:**\n\n\n\n```json\n{}"), "L1 不渲染空 details");
 });
 
+test("details 块渲染：多行字符串不再转义单行（2026-09-14）", () => {
+  // L0: diff/patch 全字段块渲染
+  assert.ok(l0.includes("```text\n" + EDIT_DIFF + "\n```"), "L0 diff 为 text 围栏块");
+  assert.ok(l0.includes("```diff\n--- a.svg\n+++ b.svg\n@@ -27,6 +27,6 @@\n```"), "L0 patch 为 diff 围栏块");
+  assert.ok(l0.includes("**details:** (firstChangedLine: 31)"), "标量并入头行");
+  assert.ok(!l0.includes('\\n+++'), "L0 无转义单行");
+  // L1: patch 优先去重（diff 的绝对行号翻 l0）
+  assert.ok(l1.includes("```diff\n--- a.svg\n+++ b.svg\n@@ -27,6 +27,6 @@\n```"), "L1 patch 为 diff 围栏块");
+  assert.ok(!l1.includes(EDIT_DIFF), "L1 有 patch 时 diff 去重");
+  assert.ok(!l1.includes('\\n+++'), "L1 无转义单行");
+  assert.ok(!/"patch": "/.test(l1), "L1 details 不再是 JSON 形态");
+});
+
+test("details 块渲染：无 patch 时 L1 退到 diff 块", () => {
+  const u = {
+    type: "message", id: "u1", parentId: null, timestamp: "2026-09-14T01:00:00.000Z",
+    message: { role: "user", content: "x" },
+  };
+  const r = {
+    type: "message", id: "r1", parentId: "u1", timestamp: "2026-09-14T01:00:01.000Z",
+    message: {
+      role: "toolResult", toolCallId: "e0", toolName: "edit",
+      content: [{ type: "text", text: "ok" }],
+      details: { diff: EDIT_DIFF, firstChangedLine: 31 },
+      isError: false,
+    },
+  };
+  const md = renderL1(null, [u as never, r as never]);
+  assert.ok(md.includes("```text\n" + EDIT_DIFF + "\n```"), "diff 退化为 text 围栏块");
+  assert.ok(!md.includes("```diff"), "无 patch 不出 diff 围栏");
+  assert.ok(md.includes("(firstChangedLine: 31)"), "标量仍在头行");
+});
+
 test("L2: 工具行在最终答复之前", () => {
   const iTool = l2.indexOf("- 🔧 **read**");
   const iText = l2.indexOf(FINAL_TEXT_T1);
   assert.ok(iTool > -1 && iText > -1 && iTool < iText);
+});
+
+test("L2: turn 编号 + 轮级耗时/output tokens（2026-09-14）", () => {
+  assert.ok(l2.includes("## 👤 User · #1 · 01:00:04"), "user 头带 turn 编号");
+  assert.ok(l2.includes("## 👤 User · #3 · 01:00:22"), "compaction 后编号连续");
+  // 轮1：eUser1(04s) → eA4(13s) = 9s；usage.output = 100 + 200 = 300
+  assert.ok(l2.includes("## 🤖 Assistant · 01:00:13 · kimi-k3 · ⏱ 9s · out 300"), "轮1 耗时+token");
+  // 轮2：eUser2(14s) → eBashExec(17s) = 3s；无 usage → 不显 out
+  assert.ok(l2.includes("## 🤖 Assistant · 01:00:16 · kimi-k3 · ⏱ 3s\n"), "轮2 只显耗时");
+  // 轮3：eUser3(22s) → eA6(23s) = 1s
+  assert.ok(l2.includes("## 🤖 Assistant · 01:00:23 · kimi-k3 · ⏱ 1s\n"), "轮3 只显耗时");
 });
 
 test("渲染确定性：两次结果一致", () => {

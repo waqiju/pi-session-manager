@@ -182,12 +182,50 @@ function renderToolResult(msg: ToolResultMessage, time: string, truncate: boolea
     // 方案 B: L1 丢弃输出型工具（bash/read/write/grep/...）的 details（纯冗余，text 已含全部信息）；
     // edit 等含独有信息（diff/patch）的工具保留，按 DETAILS_BUDGET 做 line 级截断。
     const drop = truncate && DETAILS_DROP_TOOLS.has(msg.toolName ?? "");
-    if (!drop) {
-      const details = truncate ? truncateLongStrings(msg.details, DETAILS_BUDGET) : msg.details;
-      let json = JSON.stringify(details, null, 2);
-      if (truncate) json = truncateEachLine(json);
-      parts.push(`**details:**`, "", fence(json, "json"));
-    }
+    if (!drop) parts.push(...renderDetails(msg.details, truncate));
   }
   return parts.join("\n\n");
+}
+
+/** 字符串值超过该长度且无换行时也不再并入头行，而是渲染为块（头行保持可读） */
+const DETAILS_SCALAR_MAX = 120;
+
+/**
+ * toolResult details 渲染（2026-09-14 决策）：
+ * - 多行字符串值（典型：edit 的 diff/patch）渲染为围栏块——真实换行，
+ *   不再是转义 JSON 单行；patch 用 ```diff 高亮，其余用 ```text
+ * - L1 去重：patch 存在时跳过 diff（同一修改的两种表示；diff 的绝对行号仍可翻 l0）
+ * - 嵌套对象/数组渲染为 JSON 围栏块；标量并入 `**details:**` 头行
+ * - 截断与此前正交：字符串值仍先按 DETAILS_BUDGET 做 line 级截断，再渲染成块
+ */
+function renderDetails(details: unknown, truncate: boolean): string[] {
+  const renderJsonBlock = (v: unknown): string => {
+    const d = truncate ? truncateLongStrings(v, DETAILS_BUDGET) : v;
+    let json = JSON.stringify(d, null, 2);
+    if (truncate) json = truncateEachLine(json); // stringify 转义换行会合并出超长物理行
+    return fence(json, "json");
+  };
+
+  // 非对象 details（字符串/数组等）：原 JSON 路径
+  if (!details || typeof details !== "object" || Array.isArray(details)) {
+    return [`**details:**`, renderJsonBlock(details)];
+  }
+
+  const obj = details as Record<string, unknown>;
+  const scalars: string[] = [];
+  const blocks: string[] = [];
+  for (const [k, v] of Object.entries(obj)) {
+    if (truncate && k === "diff" && typeof obj.patch === "string" && obj.patch) continue; // L1 patch 优先
+    if (typeof v === "string" && (v.includes("\n") || v.length > DETAILS_SCALAR_MAX)) {
+      let text = truncate ? truncateLines(v, DETAILS_BUDGET) : v;
+      text = text.replace(/\n+$/, ""); // 去掉尾部换行，避免围栏内多出空行
+      blocks.push(`**${k}:**`, fence(text, k === "patch" ? "diff" : "text"));
+    } else if (v !== null && typeof v === "object") {
+      blocks.push(`**${k}:**`, renderJsonBlock(v));
+    } else {
+      scalars.push(`${k}: ${JSON.stringify(v)}`);
+    }
+  }
+  const head = scalars.length ? `**details:** (${scalars.join(" · ")})` : `**details:**`;
+  return [head, ...blocks];
 }
