@@ -53,7 +53,7 @@ test("L0: 全量保留", () => {
   assert.ok(l0.includes("*[image: image/png"), "图片占位符");
   assert.ok(l0.includes(COMPACTION_SUMMARY), "compaction summary");
   assert.ok(l0.includes("跳回分支点"), "分支跳回提示");
-  assert.ok(l0.includes("🔄 模型切换") && l0.includes("📛 会话命名") && l0.includes("🏷️ 标记"));
+  assert.ok(l0.includes("🔄 模型切换") && l0.includes("🆔 会话命名") && l0.includes("🏷️ 标记"));
   assert.ok(l0.includes("Custom (my-ext)") && l0.includes("Custom Message (my-ext)"));
   assert.ok(l0.includes("💻 Bash"), "bashExecution 渲染");
   assert.ok(l0.includes("❌"), "isError 标记");
@@ -197,14 +197,14 @@ test("L1: 超长会话名 inline 截断（l0 全量保留）", () => {
 });
 
 test("L2: turn 编号 + 轮级耗时/output tokens（2026-09-14）", () => {
-  assert.ok(l2.includes("## 👤 User · #1 · 01:00:04"), "user 头带 turn 编号");
-  assert.ok(l2.includes("## 👤 User · #3 · 01:00:22"), "compaction 后编号连续");
+  assert.ok(l2.includes("## 🙋 User · #1 · 01:00:04"), "user 头带 turn 编号");
+  assert.ok(l2.includes("## 🙋 User · #3 · 01:00:22"), "compaction 后编号连续");
   // 轮1：eUser1(04s) → eA4(13s) = 9s；usage.output = 100 + 200 = 300；标题时间 = 轮内首条 assistant(eA1, 05s)
-  assert.ok(l2.includes("## 🤖 Assistant · 01:00:05 · kimi-k3 · ⏱ 9s · out 300"), "轮1 耗时+token");
+  assert.ok(l2.includes("## ✨ Assistant · 01:00:05 · kimi-k3 · ⏱ 9s · out 300"), "轮1 耗时+token");
   // 轮2：eUser2(14s) → eBashExec(17s) = 3s；无 usage → 不显 out
-  assert.ok(l2.includes("## 🤖 Assistant · 01:00:16 · kimi-k3 · ⏱ 3s\n"), "轮2 只显耗时");
+  assert.ok(l2.includes("## ✨ Assistant · 01:00:16 · kimi-k3 · ⏱ 3s\n"), "轮2 只显耗时");
   // 轮3：eUser3(22s) → eA6(23s) = 1s
-  assert.ok(l2.includes("## 🤖 Assistant · 01:00:23 · kimi-k3 · ⏱ 1s\n"), "轮3 只显耗时");
+  assert.ok(l2.includes("## ✨ Assistant · 01:00:23 · kimi-k3 · ⏱ 1s\n"), "轮3 只显耗时");
 });
 
 test("L2: thinking 占位 + text 与工具按序交织（2026-09-14）", () => {
@@ -220,7 +220,7 @@ test("L2: thinking 占位 + text 与工具按序交织（2026-09-14）", () => {
 test("L3: 纯问答视图（每轮只留最终答复）", () => {
   assert.ok(l3.includes('level: "l3"'));
   assert.ok(l3.includes(USER_PROMPT_1), "user prompt 保留");
-  assert.ok(l3.includes("## 👤 User · #1 · 01:00:04"), "turn 编号保留");
+  assert.ok(l3.includes("## 🙋 User · #1 · 01:00:04"), "turn 编号保留");
   assert.ok(l3.includes(FINAL_TEXT_T1), "轮1 最终答复保留");
   assert.ok(l3.includes(FINAL_TEXT_T2), "轮2 最终答复保留");
   assert.ok(l3.includes(FINAL_TEXT_T3), "轮3 最终答复保留");
@@ -231,7 +231,7 @@ test("L3: 纯问答视图（每轮只留最终答复）", () => {
   assert.ok(l3.includes(COMPACTION_SUMMARY), "compaction summary 保留");
   assert.ok(l3.includes("跳回分支点"), "分支提示保留");
   // 节标题与轮级统计同 l2 完全一致（时间 = 轮内首条 assistant）
-  assert.ok(l3.includes("## 🤖 Assistant · 01:00:05 · kimi-k3 · ⏱ 9s · out 300"), "节标题+统计同 l2");
+  assert.ok(l3.includes("## ✨ Assistant · 01:00:05 · kimi-k3 · ⏱ 9s · out 300"), "节标题+统计同 l2");
   assert.ok(l3.length < l2.length, "L3 比 L2 短");
 });
 
@@ -262,17 +262,17 @@ test("L3: 边界——轮内向前取最后 text / 无 text 轮省略 assistant 
     mk("a4", "u3", 21, { role: "assistant", content: [{ type: "text", text: "最终答复" }], model: "m", stopReason: "stop" }),
   ];
   const md = renderL3(null, entries as never);
-  const iU1 = md.indexOf("## 👤 User · #1");
-  const iU2 = md.indexOf("## 👤 User · #2");
-  const iU3 = md.indexOf("## 👤 User · #3");
+  const iU1 = md.indexOf("## 🙋 User · #1");
+  const iU2 = md.indexOf("## 🙋 User · #2");
+  const iU3 = md.indexOf("## 🙋 User · #3");
   const turn1 = md.slice(iU1, iU2);
   assert.ok(turn1.includes("早期答复"), "最后一条无 text 时向前找轮内最近 text");
   assert.ok(!turn1.includes("🔧"), "工具行不出现");
   const turn2 = md.slice(iU2, iU3);
-  assert.ok(!turn2.includes("## 🤖 Assistant"), "无 text 轮省略 assistant 节");
+  assert.ok(!turn2.includes("## ✨ Assistant"), "无 text 轮省略 assistant 节");
   assert.ok(turn2.includes("> ⏱ 3s · out 5"), "统计退化为独立 meta 行");
   assert.ok(md.includes("最终答复"), "轮3 正常");
-  assert.equal(md.match(/## 🤖 Assistant/g)?.length, 2, "全文只有两个 assistant 节");
+  assert.equal(md.match(/## ✨ Assistant/g)?.length, 2, "全文只有两个 assistant 节");
 });
 
 test("渲染确定性：两次结果一致", () => {

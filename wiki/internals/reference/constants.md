@@ -23,7 +23,7 @@
 
 | 常量 | 当前值 | 语义 |
 |------|--------|------|
-| `GARDEN_VERSION` | `"0.7.0"` | 渲染行为版本。写入 frontmatter `version`；增量判断要求输出文件的 version 与之一致，否则重新生成 |
+| `GARDEN_VERSION` | `"0.7.2"` | 渲染行为版本。写入 frontmatter `version`；增量判断要求输出文件的 version 与之一致，否则重新生成 |
 
 版本历史：
 - `0.2.0` 引入版本标记与 details 丢弃策略
@@ -39,6 +39,11 @@
   （thinking 占位 / 中间 text / 工具一行摘要丢弃）——即 0.6.0 前 l2
   「只留每轮最终答复」的行为回归为独立级别，且更进一步去掉工具行。
   l2.ts 引擎抽为 `skeleton.ts`（l2/l3 共用，finalOnly 开关），l2.ts 改为薄封装
+- `0.7.1` 标题/标记 emoji 刷新：User 👤→🙋、Assistant 🤖→✨、
+  Compaction 🗜️→🔀、Branch Summary/跳回提示 ⑂→🔀、会话命名 📛→🆔
+  （🗜️/⑂ 依赖 VS16 或为数学符号，部分终端渲染为暗色文字符号）
+- `0.7.2` Compaction 回退 🔀→🗜️：🔀 是「分叉」意象与压缩语义错位；
+  候选 🪗 在部分字体缺字形（豆腐块）。语义最准优先，接受其 VS16 渲染风险
 
 ## details 丢弃名单（src/render/shared.ts）
 

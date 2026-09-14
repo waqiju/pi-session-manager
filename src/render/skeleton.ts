@@ -98,7 +98,7 @@ export function renderSkeleton(
       // 仅 bashExecution）：assistant 节整体省略，统计退化为独立 meta 行
       if (stats) out.push(`> ${stats}`);
     } else if (sectionMeta) {
-      const head = `## 🤖 Assistant · ${sectionMeta.time}${sectionMeta.model ? ` · ${sectionMeta.model}` : ""}${stats ? ` · ${stats}` : ""}`;
+      const head = `## ✨ Assistant · ${sectionMeta.time}${sectionMeta.model ? ` · ${sectionMeta.model}` : ""}${stats ? ` · ${stats}` : ""}`;
       out.push(`${head}\n\n${parts.join("\n\n")}`);
     } else {
       // 无 assistant（如只有 bashExecution）：裸内容 + 统计 meta 行
@@ -125,7 +125,7 @@ export function renderSkeleton(
     }
     if (entry.type === "branch_summary") {
       flushAll();
-      out.push(`## ⑂ Branch Summary · ${fmtTime(entry.timestamp)}\n\n${(entry as any).summary ?? ""}`);
+      out.push(`## 🔀 Branch Summary · ${fmtTime(entry.timestamp)}\n\n${(entry as any).summary ?? ""}`);
       continue;
     }
     if (entry.type !== "message") continue; // 其余元信息进 frontmatter / 忽略
@@ -142,7 +142,7 @@ export function renderSkeleton(
         turnHasUsage = false;
         turnActive = false;
         turnStatsShown = false;
-        out.push(`## 👤 User · #${turnNo} · ${time}\n\n${userText(msg.content)}`);
+        out.push(`## 🙋 User · #${turnNo} · ${time}\n\n${userText(msg.content)}`);
         break;
       }
       case "assistant": {

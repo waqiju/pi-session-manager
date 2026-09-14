@@ -39,6 +39,6 @@ garden 不做树重建，按**文件 append 顺序**渲染全部四级，理由�
 - 分支的实际形态是 `...A1, A2, A3（废弃支）, branch_summary, B1, B2...`，
   线性读唯一的障碍是「突然跳回过去」
 - 因此渲染时检测 `entry.parentId != 上一条 entry.id`，插入
-  `> ⑂ 跳回分支点 \`<id>\`` 提示，配合 branch_summary 即可读懂
+  `> 🔀 跳回分支点 \`<id>\`` 提示，配合 branch_summary 即可读懂
 
 l2 同样按文件顺序（废弃分支里的 user prompt 也有信息量：能看出「试过什么又放弃了」）。

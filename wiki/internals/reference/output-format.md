@@ -31,12 +31,12 @@ garden 生成的 markdown 的完整格式约定。面向：阅读者、后续处
 
 | 形态 | 含义 |
 |------|------|
-| `## 👤 User · HH:MM:SS` | 用户消息 |
-| `## 🤖 Assistant · HH:MM:SS · <model>` | assistant 消息 |
+| `## 🙋 User · HH:MM:SS` | 用户消息 |
+| `## ✨ Assistant · HH:MM:SS · <model>` | assistant 消息 |
 | `## 🔧 Tool Result · <tool> · HH:MM:SS` | 工具返回；出错时行尾加 `❌` |
 | `## 💻 Bash · HH:MM:SS` | bashExecution 消息（`!!` 等） |
 | `## 🗜️ Compaction · HH:MM:SS` | 压缩点（summary 全量 + tokensBefore 等元信息） |
-| `## ⑂ Branch Summary · HH:MM:SS` | 分支总结 |
+| `## 🔀 Branch Summary · HH:MM:SS` | 分支总结 |
 | `## 📦 Custom (<customType>) · HH:MM:SS` | custom entry（JSON data） |
 | `## 📎 Custom Message (<customType>) · HH:MM:SS` | 扩展注入的消息 |
 | `## ❓ 未知 entry (<type>)` | 哨兵：遇到了不认识的类型（跟进：wiki/internals/tasks/add-entry-type.md） |
@@ -49,9 +49,9 @@ garden 生成的 markdown 的完整格式约定。面向：阅读者、后续处
 |------|------|
 | `> 🔄 模型切换 → **provider/model** · time` | model_change |
 | `> 🧠 thinking level → **high** · time` | thinking_level_change |
-| `> 📛 会话命名：**name** · time` | session_info（l1 中 name 超长时 inline 截断，预算 `SESSION_NAME_BUDGET`=100） |
+| `> 🆔 会话命名：**name** · time` | session_info（l1 中 name 超长时 inline 截断，预算 `SESSION_NAME_BUDGET`=100） |
 | `> 🏷️ 标记 \`<targetId>\`：**label** · time` | label |
-| `> ⑂ 跳回分支点 \`<id>\`` / `> ⑂ 回到会话起点` | 分支跳回（parentId ≠ 上一条 id） |
+| `> 🔀 跳回分支点 \`<id>\`` / `> 🔀 回到会话起点` | 分支跳回（parentId ≠ 上一条 id） |
 | `> ⚠️ stopReason: \`aborted\` — ...` | assistant 非正常结束（error/aborted） |
 
 assistant 消息内：`thinking` 渲染为 `**🧠 Thinking:**` + 围栏代码块；
@@ -84,8 +84,8 @@ assistant 消息内：`thinking` 渲染为 `**🧠 Thinking:**` + 围栏代码�
   工具行交织）、thinking 占位段落、
   工具一行摘要（`- 🔧 **<tool>** \`<detail>\``，报错行尾加 ❌）、
   compaction / branch_summary 的 summary、分支提示
-- user 节标题带 turn 编号：`## 👤 User · #N · HH:MM:SS`（compaction 不重置）
-- assistant 节标题带轮级统计：`## 🤖 Assistant · HH:MM:SS · <model> · ⏱ 45s · out 5.3k`
+- user 节标题带 turn 编号：`## 🙋 User · #N · HH:MM:SS`（compaction 不重置）
+- assistant 节标题带轮级统计：`## ✨ Assistant · HH:MM:SS · <model> · ⏱ 45s · out 5.3k`
   - 耗时 = 轮内最后一个 assistant/toolResult/bashExecution − user 消息起点（墙钟，不含轮间间隔）
   - `out` = 轮内 assistant usage.output 求和（紧凑格式：300 / 5.3k / 1.2M）；无 usage 不显
   - 一轮无含 text 的 assistant 时，统计退化为独立行 `> ⏱ 45s · out 5.3k`

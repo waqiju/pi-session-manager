@@ -51,7 +51,7 @@ garden 是单向的格式转换器：pi 的 session jsonl → 四级 markdown �
 ## 关键设计点
 
 - **tree → 线性**：session entry 经 `id/parentId` 组成树，但渲染不做树重建，
-  按文件 append 顺序输出；`parentId` 不是上一条时插入 `> ⑂ 跳回分支点` 提示
+  按文件 append 顺序输出；`parentId` 不是上一条时插入 `> 🔀 跳回分支点` 提示
   （理由与细节见 wiki/internals/concepts/session-format.md）。
 - **L0/L1 共用引擎**：两者差异只是截断开关（`truncate` 布尔），避免两份渲染逻辑漂移。
 - **L2/L3 共用引擎**：差异只是 finalOnly 开关（l3 每轮只留最后一段 assistant text），

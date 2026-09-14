@@ -1,7 +1,7 @@
 import type { Entry, SessionHeader, Usage } from "../types.ts";
 
 /** 生成器版本：行为变更时 bump，增量判断会检测到不一致并全量重生成 */
-export const GARDEN_VERSION = "0.7.0";
+export const GARDEN_VERSION = "0.7.2";
 
 export interface RenderOptions {
   /** 源文件名（xxx.jsonl），写入 frontmatter */
@@ -59,8 +59,8 @@ export function isEmptyDetails(d: unknown): boolean {
 export function branchNote(prev: Entry | null, entry: Entry): string | null {
   if (!prev) return null;
   if (entry.parentId === prev.id) return null;
-  if (entry.parentId == null) return `> ⑂ 回到会话起点`;
-  return `> ⑂ 跳回分支点 \`${entry.parentId}\``;
+  if (entry.parentId == null) return `> 🔀 回到会话起点`;
+  return `> 🔀 跳回分支点 \`${entry.parentId}\``;
 }
 
 // ---------- frontmatter ----------

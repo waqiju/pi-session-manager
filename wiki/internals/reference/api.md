@@ -48,7 +48,7 @@
 | `frontmatter(header, entries, level, sourceName?) => string` | YAML frontmatter |
 | `collectStats(entries) => Stats` | 消息计数、模型列表、token/成本汇总、session 名 |
 | `fence(text, info?) => string` | 自适应代码围栏（内容含 ``` 时自动升级） |
-| `branchNote(prev, entry) => string \| null` | parentId 跳回检测 → `> ⑂` 提示行 |
+| `branchNote(prev, entry) => string \| null` | parentId 跳回检测 → `> 🔀` 提示行 |
 | `truncateHeadTail` 等已移除 | 截断统一在 truncate.ts |
 | `fmtTime` / `fmtBytes` / `imagePlaceholder` | 小工具 |
 | `DETAILS_DROP_TOOLS` / `isEmptyDetails` | L1 的 details 丢弃策略（见 wiki/internals/reference/constants.md） |

@@ -68,7 +68,7 @@ function renderEntry(entry: Entry, truncate: boolean): string | null {
       // l1 封顶：扩展（如 pi-ssh-remote）会把首条 prompt 全文拼进会话名
       const name = String((entry as any).name ?? "");
       const shown = truncate ? truncateInline(name, SESSION_NAME_BUDGET) : name;
-      return `> 📛 会话命名：**${shown}** · ${time}`;
+      return `> 🆔 会话命名：**${shown}** · ${time}`;
     }
     case "label": {
       const e = entry as any;
@@ -87,7 +87,7 @@ function renderEntry(entry: Entry, truncate: boolean): string | null {
     }
     case "branch_summary": {
       const e = entry as any;
-      return `## ⑂ Branch Summary · ${time}\n\n${e.summary ?? ""}\n\n> from: \`${e.fromId}\``;
+      return `## 🔀 Branch Summary · ${time}\n\n${e.summary ?? ""}\n\n> from: \`${e.fromId}\``;
     }
     case "custom": {
       const e = entry as any;
@@ -108,7 +108,7 @@ function renderEntry(entry: Entry, truncate: boolean): string | null {
 function renderMessage(msg: AgentMessage, time: string, truncate: boolean): string {
   switch (msg.role) {
     case "user":
-      return `## 👤 User · ${time}\n\n${renderUserContent(msg.content)}`;
+      return `## 🙋 User · ${time}\n\n${renderUserContent(msg.content)}`;
     case "assistant":
       return renderAssistant(msg, time, truncate);
     case "toolResult":
@@ -129,7 +129,7 @@ function renderMessage(msg: AgentMessage, time: string, truncate: boolean): stri
     case "custom":
       return `## 📎 Custom (${msg.customType}) · ${time}\n\n${renderUserContent(msg.content)}`;
     case "branchSummary":
-      return `## ⑂ Branch Summary · ${time}\n\n${msg.summary ?? ""}`;
+      return `## 🔀 Branch Summary · ${time}\n\n${msg.summary ?? ""}`;
     case "compactionSummary":
       return `## 🗜️ Compaction Summary · ${time}\n\n${msg.summary ?? ""}`;
     default:
@@ -148,7 +148,7 @@ function renderUserContent(content: string | ContentBlock[]): string {
 }
 
 function renderAssistant(msg: AssistantMessage, time: string, truncate: boolean): string {
-  const header = `## 🤖 Assistant · ${time}${msg.model ? ` · ${msg.model}` : ""}`;
+  const header = `## ✨ Assistant · ${time}${msg.model ? ` · ${msg.model}` : ""}`;
   const parts: string[] = [header];
   for (const block of msg.content ?? []) {
     if (block.type === "thinking") {
