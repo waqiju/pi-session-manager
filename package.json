@@ -1,0 +1,18 @@
+{
+  "name": "pi-session-manager",
+  "version": "0.1.0",
+  "description": "garden: 把 pi 的 session 记录 (.jsonl) 转换为三级可读 markdown (l0/l1/l2)",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "garden": "src/cli.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "garden": "node src/cli.ts",
+    "test": "node --test test/render.test.ts test/cli.test.ts"
+  },
+  "license": "MIT"
+}
