@@ -178,6 +178,22 @@ test("L2: 工具行在最终答复之前", () => {
   assert.ok(iTool > -1 && iText > -1 && iTool < iText);
 });
 
+test("L1: 超长会话名 inline 截断（l0 全量保留）", () => {
+  // pi-ssh-remote 会把首条 prompt 全文拼进会话名（实测 242 字符）
+  const longName = "SSH m106:/Users/plato/1_Workspace/mi-cloud-sync (main) • " + "需要新增个功能 ".repeat(30);
+  const si = { type: "session_info", id: "s1", parentId: null, timestamp: "2026-09-14T01:00:00.000Z", name: longName };
+  const md0 = renderL0(null, [si as never]);
+  const md1 = renderL1(null, [si as never]);
+  // 注意：frontmatter 的 name 字段本来就是全量，必须只查正文中的「会话命名」行
+  const line0 = md0.split("\n").find((l) => l.includes("会话命名"));
+  const line1 = md1.split("\n").find((l) => l.includes("会话命名"));
+  assert.ok(line0?.includes(longName), "l0 行内全量保留");
+  assert.ok(line1 && !line1.includes(longName), "l1 行内截断");
+  assert.ok(line1?.includes("SSH m106:"), "头部保留");
+  assert.ok(line1?.includes("... (omitted"), "有 inline marker");
+  assert.ok(line1 && line1.length < 200, `截后行长 ${line1?.length} 有界`);
+});
+
 test("L2: turn 编号 + 轮级耗时/output tokens（2026-09-14）", () => {
   assert.ok(l2.includes("## 👤 User · #1 · 01:00:04"), "user 头带 turn 编号");
   assert.ok(l2.includes("## 👤 User · #3 · 01:00:22"), "compaction 后编号连续");

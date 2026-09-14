@@ -46,6 +46,7 @@ l0 → l1 的核心机制。目标：在**不破坏可读性**的前提下把体
 | `THINKING_BUDGET` | 1000 | thinking p50=393、p75=1495；同 toolResult 的「一屏」原则 |
 | `DETAILS_BUDGET` | 4000 | edit 的 diff/patch 是实质内容，多留；巨型 diff（实测最大 26K）封顶 |
 | `INLINE_LIMIT` | 500 | line 级截断后 >500 字符的残留行共 3.2MB（toolResult 2.06 / thinking 0.94 / args 0.24） |
+| `SESSION_NAME_BUDGET` | 100 | session_info 会话名（仅 l1）；pi-ssh-remote 会把首条 prompt 全文拼进名字（实测 242 字符） |
 | 头尾比 | 6:4 | 实测 error 关键行十分位分布近乎均匀 `[8,9,10,10,10,10,11,10,11,11]`（尾部仅略高）→ 头尾都留、砍中间，无需向尾部过度倾斜 |
 
 ## 已知边界（feature，非 bug）

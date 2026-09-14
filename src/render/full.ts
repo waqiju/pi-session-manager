@@ -9,10 +9,12 @@ import type {
 import {
   CUSTOM_DATA_BUDGET,
   DETAILS_BUDGET,
+  SESSION_NAME_BUDGET,
   THINKING_BUDGET,
   TOOL_ARG_BUDGET,
   TOOL_RESULT_BUDGET,
   truncateEachLine,
+  truncateInline,
   truncateLines,
   truncateLongStrings,
 } from "./truncate.ts";
@@ -62,8 +64,12 @@ function renderEntry(entry: Entry, truncate: boolean): string | null {
       return `> 🔄 模型切换 → **${(entry as any).provider}/${(entry as any).modelId}** · ${time}`;
     case "thinking_level_change":
       return `> 🧠 thinking level → **${(entry as any).thinkingLevel}** · ${time}`;
-    case "session_info":
-      return `> 📛 会话命名：**${(entry as any).name}** · ${time}`;
+    case "session_info": {
+      // l1 封顶：扩展（如 pi-ssh-remote）会把首条 prompt 全文拼进会话名
+      const name = String((entry as any).name ?? "");
+      const shown = truncate ? truncateInline(name, SESSION_NAME_BUDGET) : name;
+      return `> 📛 会话命名：**${shown}** · ${time}`;
+    }
     case "label": {
       const e = entry as any;
       return e.label

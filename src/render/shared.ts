@@ -1,7 +1,7 @@
 import type { Entry, SessionHeader, Usage } from "../types.ts";
 
 /** 生成器版本：行为变更时 bump，增量判断会检测到不一致并全量重生成 */
-export const GARDEN_VERSION = "0.6.0";
+export const GARDEN_VERSION = "0.6.1";
 
 export interface RenderOptions {
   /** 源文件名（xxx.jsonl），写入 frontmatter */

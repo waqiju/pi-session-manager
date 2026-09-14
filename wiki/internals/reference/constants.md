@@ -14,6 +14,7 @@
 | `CUSTOM_DATA_BUDGET` | 2000 | custom entry 的 data | — |
 | `INLINE_LIMIT` | 500 | 任意物理行封顶 | 残留超长行统计 |
 | `INLINE_MIN_OMIT` | 64 | 省略量低于此值不截 | marker ≈30 字符，省太少是噪声 |
+| `SESSION_NAME_BUDGET` | 100 | session_info 会话名（仅 l1） | 扩展会把首条 prompt 全文拼进名字 |
 | 头尾比（默认参数） | 0.6 | 全部截断 | error 行分布均匀，尾部略高 |
 
 详细依据：wiki/internals/concepts/truncation.md。
@@ -22,7 +23,7 @@
 
 | 常量 | 当前值 | 语义 |
 |------|--------|------|
-| `GARDEN_VERSION` | `"0.6.0"` | 渲染行为版本。写入 frontmatter `version`；增量判断要求输出文件的 version 与之一致，否则重新生成 |
+| `GARDEN_VERSION` | `"0.6.1"` | 渲染行为版本。写入 frontmatter `version`；增量判断要求输出文件的 version 与之一致，否则重新生成 |
 
 版本历史：
 - `0.2.0` 引入版本标记与 details 丢弃策略
@@ -32,6 +33,8 @@
   l2 turn 编号 + 轮级耗时/output tokens
 - `0.6.0` l2：assistant text 全量保留（按序交织，原为只留每轮最后一条）；
   thinking 改为占位段落（原为丢弃）；节标题时间改为轮内首条 assistant
+- `0.6.1` l1：session_info 会话名 inline 封顶 100（`SESSION_NAME_BUDGET`；
+  pi-ssh-remote 会把首条 prompt 全文拼进名字，实测 242 字符）
 
 ## details 丢弃名单（src/render/shared.ts）
 

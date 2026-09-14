@@ -36,6 +36,9 @@ export const INLINE_LIMIT = 500;
 /** inline 级：省略量低于该值则不截（至少省出一个 marker 的量级，否则只增噪声） */
 export const INLINE_MIN_OMIT = 64;
 
+/** session_info 会话名 inline 封顶（pi-ssh-remote 等扩展会把首条 prompt 全文拼进名字，实测 242 字符） */
+export const SESSION_NAME_BUDGET = 100;
+
 const SOFT_BREAK_CHARS = new Set([" ", ",", "\t", "，", "、", "；", ";"]);
 
 /**

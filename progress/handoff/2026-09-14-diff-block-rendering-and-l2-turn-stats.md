@@ -2,7 +2,7 @@
 
 - 日期：2026-09-14
 - 项目：garden（pi-session-manager）
-- 状态：已完成；对应代码状态 `GARDEN_VERSION = 0.6.0`
+- 状态：已完成；对应代码状态 `GARDEN_VERSION = 0.6.1`
 - 上一棒：[2026-09-14-l1-optimization-and-next-steps.md](2026-09-14-l1-optimization-and-next-steps.md)
 
 ## 1. 本轮完成
@@ -71,7 +71,25 @@
 - `wiki/internals/concepts/truncation.md`：JSON 物理行说明更新（details 多行值不再走 JSON）
 - `python3 scripts/check_wiki_links.py` 通过
 
-## 4. 遗留（沿上一棒）
+## 4. 追加：会话命名异常调查（0.6.1）
+
+用户报告某 session 的 l1 里出现多条「会话命名」且名字混入 user prompt，怀疑转换错误。
+调查结论：**garden 渲染忠实，非转换 bug**：
+
+- 多次命名来源：`@99percentpeople/pi-ssh-remote` 扩展的自动命名——SSH 连接时命名
+  `SSH <target>:<cwd>` → 检测到 git branch 后重命名加 `(main)` → 首条 user 消息的
+  `message_end` 时把 **prompt 全文**（`GK()` 提取，无截断）拼为 `... (main) • <prompt>`。
+  另有 `JX` 守卫：手动 `/name` 后不再自动改。
+- 为什么格外多：该 session 是从 09-05 会话 fork 的（header.parentSession 确认），
+  文件开头继承了旧会话的 3 条命名记录，加上新会话自己的 3 条 + 手动 `/name to-delete`。
+- 修复（garden 侧，防御性）：l1 中 session_info 的 name 做 inline 封顶
+  （新常量 `SESSION_NAME_BUDGET = 100`），l0 全量保留。frontmatter `name` 不受影响
+  （取最后一条 session_info，本会话即手动名 `to-delete`）。
+- 源头建议（未实施）：pi-ssh-remote 的 `GK()` 拼接 prompt 前应截断（如 50 字符）。
+  该包发布的是 minified dist（npm `@99percentpeople/pi-ssh-remote`@0.6.2），
+  补丁需打到上游源码 github.com/99percentpeople/pi-extensions/tree/main/extensions/ssh-remote。
+
+## 5. 遗留（沿上一棒）
 
 - ① garden 索引（推荐下轮做）、② 按价值分配预算（isError 加倍等）、③ pi 接入
 - 挂起：嵌套目录递归扫描方案 A（保持不递归）仍待用户拍板

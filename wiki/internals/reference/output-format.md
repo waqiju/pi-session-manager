@@ -49,7 +49,7 @@ garden 生成的 markdown 的完整格式约定。面向：阅读者、后续处
 |------|------|
 | `> 🔄 模型切换 → **provider/model** · time` | model_change |
 | `> 🧠 thinking level → **high** · time` | thinking_level_change |
-| `> 📛 会话命名：**name** · time` | session_info |
+| `> 📛 会话命名：**name** · time` | session_info（l1 中 name 超长时 inline 截断，预算 `SESSION_NAME_BUDGET`=100） |
 | `> 🏷️ 标记 \`<targetId>\`：**label** · time` | label |
 | `> ⑂ 跳回分支点 \`<id>\`` / `> ⑂ 回到会话起点` | 分支跳回（parentId ≠ 上一条 id） |
 | `> ⚠️ stopReason: \`aborted\` — ...` | assistant 非正常结束（error/aborted） |
