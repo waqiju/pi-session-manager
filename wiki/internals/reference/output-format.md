@@ -5,10 +5,22 @@ garden 生成的 markdown 的完整格式约定。面向：阅读者、后续处
 ## 文件命名与位置
 
 ```
-<garden根目录>/<sessions子目录名>/<session文件名去 .jsonl>.<level>.md
+<garden根目录>/<sessions子目录名>/<本地日期>-<序号>-<slug>.<level>.md
 ```
 
-`level` ∈ `l0` / `l1` / `l2` / `l3`。目录结构镜像 sessions。
+例：`2026-08-31-002-禁用进程-CPU占用高.l1.md`
+
+- **本地日期**：session 开始时间（header timestamp）按运行机器本地时区取
+  `YYYY-MM-DD`（人按本地时间回忆会话；frontmatter 里的 `started` 仍是 UTC）
+- **序号**：同一子目录内按日期分组，组内按开始时间升序，从 `001` 起（3 位 pad）。
+  编号是组内全局属性：插入更早的 session 会使后续序号漂移（文件改名）
+- **slug**：最后一条 `session_info.name`（用户可多次 `/name`，last wins）；
+  无 → `untitled`。空白与文件系统非法字符压为 `_`，尾部 `.` 去掉，最长 40 字符
+- `level` ∈ `l0` / `l1` / `l2` / `l3`。目录结构镜像 sessions
+
+改名或序号漂移时旧文件会成为孤儿：写入前按 frontmatter `session_id` 匹配删除
+同 session 的旧命名文件（只读旧文件前 2KB）。源 jsonl 已删除的孤儿输出不删
+（归档语义）。实现：`src/naming.ts`（命名）+ `src/cli.ts`（清理）。
 
 ## frontmatter（YAML，每份文件开头）
 
