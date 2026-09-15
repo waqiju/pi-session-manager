@@ -53,12 +53,13 @@ function withEnv<T>(patch: Record<string, string | undefined>, fn: () => T): T {
   }
 }
 
-test("readConfig: 默认值 / 停用 / live 间隔", () => {
-  assert.deepEqual(readConfig({}), { enabled: true, liveIntervalMs: 60_000 });
-  assert.deepEqual(readConfig({ PI_GARDEN: "0" }), { enabled: false, liveIntervalMs: 60_000 });
-  assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "0" }), { enabled: true, liveIntervalMs: 0 });
-  assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "2.5" }), { enabled: true, liveIntervalMs: 2500 });
-  assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "abc" }), { enabled: true, liveIntervalMs: 0 });
+test("readConfig: 默认值 / 停用 / live 间隔 / 选择器全文开关", () => {
+  assert.deepEqual(readConfig({}), { enabled: true, liveIntervalMs: 60_000, selectorFullText: true });
+  assert.deepEqual(readConfig({ PI_GARDEN: "0" }), { enabled: false, liveIntervalMs: 60_000, selectorFullText: true });
+  assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "0" }), { enabled: true, liveIntervalMs: 0, selectorFullText: true });
+  assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "2.5" }), { enabled: true, liveIntervalMs: 2500, selectorFullText: true });
+  assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "abc" }), { enabled: true, liveIntervalMs: 0, selectorFullText: true });
+  assert.deepEqual(readConfig({ PI_GARDEN_SELECTOR_FULLTEXT: "0" }), { enabled: true, liveIntervalMs: 60_000, selectorFullText: false });
 });
 
 test("gardenPathsFor: 只接受 pi 标准 sessions 布局", () => {

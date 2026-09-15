@@ -7,9 +7,13 @@
  *   - 第 1 行 → header（id / cwd / timestamp / parentSession —— fork 继承链全靠它）
  *   - 缓冲内顺带找：首条 user 消息文本（firstMessage）、session_info 名（name）
  *   - modified 用 stat.mtime 近似（选择器只用它排序）
- * 再按需从 garden md frontmatter 富化 name / messageCount（garden 转换常驻，几乎免费）。
- *
- * 已知取舍：不建 allMessagesText，内容全文搜索不可用（id / name / cwd 可搜）。
+ * 再按需从 garden md 富化（garden 转换常驻，几乎免费）：
+ *   - 输出文件名是可读命名（<date>-<seq>-<slug>.lN.md），与源 jsonl 名无推导关系，
+ *     按 frontmatter session_id 建 l2 索引反查（buildGardenIndex）
+ *   - l2 frontmatter → name / messageCount
+ *   - l2 正文 → allMessagesText（选择器全文搜索语料；语义与内建的 user+assistant text
+ *     相当。全量仅数 MB 级，远小于 jsonl 全读，默认可直接开；
+ *     PI_GARDEN_SELECTOR_FULLTEXT=0 可关，退回 A2 取舍：只搜 id/name/cwd）
  */
 
 import { open, readdir, stat } from "node:fs/promises";
@@ -33,6 +37,8 @@ export interface SessionListItem {
 export const HEAD_READ_BYTES = 64 * 1024;
 /** garden frontmatter 读取上限（frontmatter 仅 ~20 行） */
 const FRONTMATTER_READ_BYTES = 4096;
+/** garden 正文读取上限（全文搜索语料；l2 平均 ~20KB，上限只是防异常大文件） */
+export const FULLTEXT_READ_BYTES = 1024 * 1024;
 /** 头部信息：header + 缓冲内能找到的 firstMessage / name */
 export interface SessionHead {
   id: string;
@@ -122,12 +128,12 @@ export async function collectSessionFiles(dir: string): Promise<string[]> {
   }
 }
 
-/** sessions 根下所有子目录（跳过点开头的目录，如手工归档的 .mono） */
+/** sessions 根下所有子目录（含 symlink 目录，对齐内建 listAll；跳过点开头的目录，如手工归档的 .mono） */
 export async function collectSessionSubdirs(sessionsRoot: string): Promise<string[]> {
   try {
     const entries = await readdir(sessionsRoot, { withFileTypes: true });
     return entries
-      .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+      .filter((e) => (e.isDirectory() || e.isSymbolicLink()) && !e.name.startsWith("."))
       .map((e) => path.join(sessionsRoot, e.name))
       .sort();
   } catch {
@@ -175,32 +181,98 @@ export function parseGardenFrontmatter(text: string): { name?: string; messageCo
   return out;
 }
 
-/**
- * 从 garden frontmatter 富化单个 item（只补缺失字段）。
- * gardenDir = 该 session 所在 sub 对应的 garden 输出目录；级别间 frontmatter 相同，读最小优先。
- */
-export async function enrichFromGarden(item: SessionListItem, gardenDir: string): Promise<void> {
-  if (item.name && item.messageCount > 0) return;
-  const base = path.basename(item.path).replace(/\.jsonl$/, "");
-  for (const level of ["l2", "l0", "l1", "l3"]) {
-    let text: string;
-    try {
-      const fh = await open(path.join(gardenDir, `${base}.${level}.md`), "r");
-      try {
-        const buf = Buffer.alloc(FRONTMATTER_READ_BYTES);
-        const { bytesRead } = await fh.read(buf, 0, FRONTMATTER_READ_BYTES, 0);
-        text = buf.toString("utf8", 0, bytesRead);
-      } finally {
-        await fh.close().catch(() => {});
-      }
-    } catch {
-      continue; // 该级别不存在，试下一个
-    }
-    const fm = parseGardenFrontmatter(text);
-    if (!item.name && fm.name) item.name = fm.name;
-    if (item.messageCount === 0 && fm.messageCount) item.messageCount = fm.messageCount;
-    return; // 找到一份 frontmatter 就够（各级别相同）
+/** 读文件前 maxBytes；文件不存在/不可读返回 null */
+async function readBounded(filePath: string, maxBytes: number): Promise<string | null> {
+  let fh;
+  try {
+    fh = await open(filePath, "r");
+  } catch {
+    return null;
   }
+  try {
+    const buf = Buffer.alloc(maxBytes);
+    const { bytesRead } = await fh.read(buf, 0, maxBytes, 0);
+    if (bytesRead === 0) return "";
+    return buf.toString("utf8", 0, bytesRead);
+  } catch {
+    return null;
+  } finally {
+    await fh.close().catch(() => {});
+  }
+}
+
+/** 剥掉 md 开头的 yaml frontmatter（无 frontmatter 原样返回） */
+export function stripFrontmatter(text: string): string {
+  const m = /^---\n[\s\S]*?\n---\n?/.exec(text);
+  return m ? text.slice(m[0].length) : text;
+}
+
+export interface EnrichOptions {
+  /** 是否读 l2 正文回填 allMessagesText（默认 true；false = 只取 frontmatter） */
+  fullText?: boolean;
+}
+
+/** 新命名风格：<date>-<seq>-<slug>.lN.md（区别于旧风格 <ISO时间戳>_<id>.lN.md） */
+const NEW_NAME_RE = /^\d{4}-\d{2}-\d{2}-\d{3}-/;
+
+/** garden 索引：session_id → 该 session l2 md 的 { 文件名, 有界内容 }（fullText 开到 1MB，否则只读头部） */
+export type GardenIndex = Map<string, { name: string; text: string }>;
+
+/**
+ * 建 garden 输出目录的 l2 索引：session_id → l2 文件内容（有界）。
+ * 输出文件名是可读命名（<date>-<seq>-<slug>），与源 jsonl 文件名无推导关系，
+ * 只能靠 frontmatter 的 session_id 反查（与 cli.ts indexOutputsBySessionId 同思路，
+ * 但只索引 l2：name/messageCount/全文语料都从它来；缺 l2 的 session 放弃富化）。
+ * 同 session 多份 l2（改名/重编号残留）时新命名风格优先。
+ * 索引直接持内容而非路径：富化不再二次打开，每 session 全程仅一次 l2 读。
+ */
+export async function buildGardenIndex(gardenDir: string, opts?: EnrichOptions): Promise<GardenIndex> {
+  const index: GardenIndex = new Map();
+  const maxBytes = opts?.fullText !== false ? FULLTEXT_READ_BYTES : FRONTMATTER_READ_BYTES;
+  let entries;
+  try {
+    entries = await readdir(gardenDir, { withFileTypes: true });
+  } catch {
+    return index;
+  }
+  const files = entries.filter((e) => e.isFile() && e.name.endsWith(".l2.md")).map((e) => e.name).sort();
+  const found = await mapLimit(files, 16, async (name) => {
+    const text = await readBounded(path.join(gardenDir, name), maxBytes);
+    if (!text) return null;
+    const m = /^session_id: ("(?:[^"\\]|\\.)*")$/m.exec(text);
+    if (!m) return null;
+    try {
+      const id = JSON.parse(m[1]);
+      return typeof id === "string" && id ? { name, id, text } : null;
+    } catch {
+      return null; // 坏 session_id 跳过
+    }
+  });
+  // 顺序解决冲突（并发读完成后单线程应用）：同 session 多份 l2 时新命名风格优先
+  for (const f of found) {
+    if (!f) continue;
+    const existing = index.get(f.id);
+    if (!existing || (NEW_NAME_RE.test(f.name) && !NEW_NAME_RE.test(existing.name))) {
+      index.set(f.id, { name: f.name, text: f.text });
+    }
+  }
+  return index;
+}
+
+/**
+ * 用 garden 索引富化单个 item（只补缺失字段；无 I/O，索引已持内容）。
+ * fullText 开（默认建索引时读正文）：frontmatter（name/messageCount）+ 正文
+ * （allMessagesText，选择器全文搜索语料）；关：只有 frontmatter。
+ */
+export function enrichFromGarden(item: SessionListItem, gardenIndex: GardenIndex, opts?: EnrichOptions): void {
+  const needText = opts?.fullText !== false && !item.allMessagesText;
+  if (item.name && item.messageCount > 0 && !needText) return;
+  const hit = gardenIndex.get(item.id);
+  if (!hit) return;
+  const fm = parseGardenFrontmatter(hit.text);
+  if (!item.name && fm.name) item.name = fm.name;
+  if (item.messageCount === 0 && fm.messageCount) item.messageCount = fm.messageCount;
+  if (needText) item.allMessagesText = stripFrontmatter(hit.text);
 }
 
 export interface FastListOptions {
@@ -208,10 +280,13 @@ export interface FastListOptions {
   concurrency?: number;
   /** 富化用的 garden 输出目录（该 scope 对应 sub 目录）；不传则跳过富化 */
   gardenDir?: string;
+  /** 是否读 garden l2/l3 正文作全文搜索语料（默认 true；false 退回只搜 id/name/cwd） */
+  fullText?: boolean;
 }
 
 async function headsToItems(files: string[], gardenDir: string | undefined, opts: FastListOptions): Promise<SessionListItem[]> {
   const concurrency = opts.concurrency ?? 16;
+  const gardenIndex = gardenDir && files.length > 0 ? await buildGardenIndex(gardenDir, { fullText: opts.fullText }) : undefined;
   let loaded = 0;
   const items = await mapLimit(files, concurrency, async (file): Promise<SessionListItem | null> => {
     try {
@@ -229,7 +304,8 @@ async function headsToItems(files: string[], gardenDir: string | undefined, opts
         firstMessage: head.firstMessage ?? "",
         allMessagesText: "",
       };
-      if (gardenDir) await enrichFromGarden(item, gardenDir);
+      if (gardenIndex) enrichFromGarden(item, gardenIndex, { fullText: opts.fullText });
+      if (!item.firstMessage) item.firstMessage = "(no messages)"; // 对齐内建显示兜底
       return item;
     } catch {
       return null;
@@ -253,25 +329,24 @@ export async function listProjectSessions(sessionDir: string, opts: FastListOpti
   return headsToItems(files, gardenDir, opts);
 }
 
-/** all scope：sessions 根下全部子目录的快速列表（一层，跳过隐藏目录） */
+/** all scope：sessions 根下全部子目录的快速列表（一层，跳过隐藏目录）；子目录间并发 */
 export async function listAllSessions(sessionsRoot: string, opts: FastListOptions = {}): Promise<SessionListItem[]> {
   const subdirs = await collectSessionSubdirs(sessionsRoot);
   const agentRoot = path.dirname(sessionsRoot);
-  const all: SessionListItem[] = [];
+  const concurrency = opts.concurrency ?? 16;
+  const filesPerDir = await mapLimit(subdirs, concurrency, async (d) => collectSessionFiles(d));
   let total = 0;
-  let loaded = 0;
-  const filesPerDir = await mapLimit(subdirs, opts.concurrency ?? 16, async (d) => collectSessionFiles(d));
   for (const files of filesPerDir) total += files.length;
-  for (let i = 0; i < subdirs.length; i++) {
-    const gardenDir = opts.gardenDir === undefined ? path.join(agentRoot, "garden", path.basename(subdirs[i])) : opts.gardenDir;
-    const items = await headsToItems(filesPerDir[i], gardenDir, {
+  let loaded = 0;
+  const perDir = await mapLimit(subdirs, Math.min(8, concurrency), async (sub, i) => {
+    const gardenDir = opts.gardenDir === undefined ? path.join(agentRoot, "garden", path.basename(sub)) : opts.gardenDir;
+    return headsToItems(filesPerDir[i], gardenDir, {
       ...opts,
       onProgress: () => {
         loaded++;
         opts.onProgress?.(loaded, total);
       },
     });
-    all.push(...items);
-  }
-  return all;
+  });
+  return perDir.flat();
 }

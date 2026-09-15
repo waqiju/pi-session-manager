@@ -43,12 +43,18 @@ ephemeral session（无 session 文件）静默跳过；非常规路径布局（
   `modified` 用 stat.mtime 近似。内建则逐行读完整个 jsonl，慢盘（drvfs）上数百个
   session 差距显著（本机 309 个 / 138.7MB：快速列表 2.0s vs 内建式全读 1.5s 温缓存，
   冷缓存 / 更慢的盘差距放大，字节量差 6.6 倍）。
-- **garden frontmatter 富化**：自动转换常驻产出 md，选择器读 l2 frontmatter 回填
-  name / messageCount（本机命中率 286/309）。
-- **已知取舍**：不建 allMessagesText，全文搜索不可用（id / name / cwd 可搜）；
-  未转换且无名的 session 显示为空标题（时间/fork 位置仍可辨认）。
+- **garden 产物富化**：输出文件名是可读命名（与 jsonl 名无推导关系），按 frontmatter
+  `session_id` 建 l2 索引反查（`buildGardenIndex`，同 session 多份时新命名优先）。
+  l2 frontmatter 回填 name / messageCount；l2 正文（剥 frontmatter，单文件上限
+  `FULLTEXT_READ_BYTES=1MB`）回填 allMessagesText → **全文搜索可用**（语料语义与内建
+  user+assistant text 相当；本机 315 session 语料 4.7MB，all scope ≈2.6s）。
+  `PI_GARDEN_SELECTOR_FULLTEXT=0` 关闭，退回只搜 id/name/cwd。
+- **已知取舍**：未转换（无 l2 产物）且无名的 session 显示为空标题（时间/fork 位置
+  仍可辨认）；l2 正文含工具行等渲染噪音，fuzzy 搜索召回略宽于内建（短语可用
+  `"exact"` / `re:` 语法）。
 - 选中后 `ctx.switchSession(path)`；cwd 缺失的跨机器 session 会报错 notify
-  （内建的 cwd 重选流未暴露给扩展）。
+  （**上游限制**：`ctx.switchSession` 未暴露内建的 cwd 重选流 `cwdOverride`，
+  扩展侧无法补齐）。
 
 ## 配置（环境变量）
 
@@ -57,6 +63,7 @@ ephemeral session（无 session 文件）静默跳过；非常规路径布局（
 | `PI_GARDEN` | `1` | `0` = 完全停用扩展（不注册任何事件/命令） |
 | `PI_GARDEN_LIVE_INTERVAL_S` | `60` | live 触发最小间隔（秒，可小数）；`0` = 关闭 live 触发 |
 | `PI_GARDEN_OPEN_CMD` | 平台默认 | 自定义打开命令；空格切分，含 `{file}` 替换否则追加为末参。平台默认：WSL `wslpath -w` + `cmd.exe /c start`，Linux `xdg-open`，macOS `open` |
+| `PI_GARDEN_SELECTOR_FULLTEXT` | `1` | `/garden` 选择器用 garden l2 正文作全文搜索语料；`0` = 关闭（退回只搜 id/name/cwd） |
 
 ## 行为细节
 

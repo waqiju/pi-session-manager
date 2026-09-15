@@ -19,6 +19,16 @@
 
 详细依据：wiki/internals/concepts/truncation.md。
 
+## 选择器常量（src/session-list.ts）
+
+与渲染无关，不改 `GARDEN_VERSION`。
+
+| 常量 | 值 | 作用域 | 依据 |
+|------|----|--------|------|
+| `HEAD_READ_BYTES` | 64KB | session jsonl 头部快读 | header + 首条 user 消息几乎总在其中 |
+| `FRONTMATTER_READ_BYTES` | 4KB | garden md frontmatter | frontmatter 仅 ~20 行 |
+| `FULLTEXT_READ_BYTES` | 1MB | garden l2 正文（搜索语料） | l2 平均 ~20KB，上限防异常大文件 |
+
 ## 生成器版本（src/render/shared.ts）
 
 | 常量 | 当前值 | 语义 |

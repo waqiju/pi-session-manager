@@ -19,6 +19,8 @@
  *   PI_GARDEN=0                     完全停用本扩展
  *   PI_GARDEN_LIVE_INTERVAL_S=60    live 转换最小间隔（秒，可小数）；0 = 关闭 live 触发
  *   PI_GARDEN_OPEN_CMD              自定义打开命令（空格切分；{file} 占位，缺省追加为末参）
+ *   PI_GARDEN_SELECTOR_FULLTEXT=1   /garden 选择器用 garden l2/l3 正文回填全文搜索语料；
+ *                                   0 = 关闭（退回只搜 id/name/cwd）
  *
  * 注意：factory 只在会话加载时运行；不在此处起 timer / watcher（pi 扩展约束）。
  */
@@ -34,6 +36,8 @@ export interface GardenConfig {
   enabled: boolean;
   /** live 触发最小间隔（ms）；0 = 关闭 */
   liveIntervalMs: number;
+  /** /garden 选择器是否用 garden md 正文作全文搜索语料（默认开） */
+  selectorFullText: boolean;
 }
 
 export function readConfig(env: NodeJS.ProcessEnv): GardenConfig {
@@ -44,7 +48,8 @@ export function readConfig(env: NodeJS.ProcessEnv): GardenConfig {
     const n = Number(raw);
     liveIntervalMs = Number.isFinite(n) && n > 0 ? n * 1000 : 0;
   }
-  return { enabled: !off, liveIntervalMs };
+  const selectorFullText = (env.PI_GARDEN_SELECTOR_FULLTEXT ?? "").trim() !== "0";
+  return { enabled: !off, liveIntervalMs, selectorFullText };
 }
 
 /**
@@ -200,8 +205,8 @@ export default function (pi: ExtensionAPI) {
       const picked = await ctx.ui.custom<string | null>(
         (tui, _theme, keybindings, done) =>
           new SessionSelectorComponent(
-            (onProgress: (loaded: number, total: number) => void) => listProjectSessions(sessionDir, { onProgress }),
-            (onProgress: (loaded: number, total: number) => void) => listAllSessions(sessionsRoot, { onProgress }),
+            (onProgress: (loaded: number, total: number) => void) => listProjectSessions(sessionDir, { onProgress, fullText: cfg.selectorFullText }),
+            (onProgress: (loaded: number, total: number) => void) => listAllSessions(sessionsRoot, { onProgress, fullText: cfg.selectorFullText }),
             (p: string) => done(p),
             () => done(null),
             () => done(null),

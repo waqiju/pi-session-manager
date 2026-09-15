@@ -67,12 +67,14 @@
 | 导出 | 说明 |
 |------|------|
 | `listProjectSessions(sessionDir, opts?) => Promise<SessionListItem[]>` | current scope：一层 `*.jsonl`，头部快读 + garden 富化 |
-| `listAllSessions(sessionsRoot, opts?) => Promise<SessionListItem[]>` | all scope：全部子目录（跳过隐藏目录） |
+| `listAllSessions(sessionsRoot, opts?) => Promise<SessionListItem[]>` | all scope：全部子目录（含 symlink 目录，跳过隐藏目录），子目录间并发 |
 | `readSessionHead(filePath) => Promise<SessionHead \| null>` | 一次有界读（`HEAD_READ_BYTES=64KB`）：header + 首条 user 消息 + 缓冲内 session_info 名 |
+| `buildGardenIndex(gardenDir, opts?) => Promise<GardenIndex>` | 按 frontmatter `session_id` 索引 l2 产物（输出是可读命名，与 jsonl 名无推导关系）；索引直持有界内容，富化零额外 I/O |
+| `enrichFromGarden(item, gardenIndex, opts?)` | 只补缺失字段：frontmatter → name/messageCount，l2 正文（剥 frontmatter）→ allMessagesText |
+| `stripFrontmatter(text) => string` | 剥掉 md 开头的 yaml frontmatter |
 | `parseGardenFrontmatter(text) => { name?, messageCount? }` | 解析 garden md frontmatter（messageCount = 各 role 求和） |
-| `enrichFromGarden(item, gardenDir)` | 只补缺失字段；按 l2→l0→l1→l3 找第一份 frontmatter |
 | `collectSessionFiles` / `collectSessionSubdirs` / `gardenDirForSessionDir` | 目录扫描与 garden 目录推导 |
-| `SessionListItem` | 鸭子类型对齐 pi 的 `SessionInfo`（`allMessagesText` 恒空） |
+| `SessionListItem` | 鸭子类型对齐 pi 的 `SessionInfo`；`firstMessage` 空时兜底 `"(no messages)"`（对齐内建） |
 
 ## open.ts（gardener-open 打开器）
 
