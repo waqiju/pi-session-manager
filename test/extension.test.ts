@@ -36,7 +36,8 @@ function setup(): { root: string; sessionFile: string } {
   return { root, sessionFile };
 }
 
-function withEnv<T>(patch: Record<string, string | undefined>, fn: () => T): T {
+/** env 补丁在 fn 全程有效（含 async fn 的所有 await 之后），落定后才还原 */
+async function withEnv<T>(patch: Record<string, string | undefined>, fn: () => T | Promise<T>): Promise<T> {
   const saved: Record<string, string | undefined> = {};
   for (const k of Object.keys(patch)) {
     saved[k] = process.env[k];
@@ -44,7 +45,7 @@ function withEnv<T>(patch: Record<string, string | undefined>, fn: () => T): T {
     else process.env[k] = patch[k];
   }
   try {
-    return fn();
+    return await fn(); // 必须 await：否则 finally 会在 async fn 的第一个 await 处提前还原
   } finally {
     for (const k of Object.keys(patch)) {
       if (saved[k] === undefined) delete process.env[k];
@@ -52,6 +53,16 @@ function withEnv<T>(patch: Record<string, string | undefined>, fn: () => T): T {
     }
   }
 }
+
+test("withEnv: async fn 全程保持补丁，结束后还原", async () => {
+  delete process.env.PI_GARDEN_TEST_PROBE;
+  await withEnv({ PI_GARDEN_TEST_PROBE: "1" }, async () => {
+    assert.equal(process.env.PI_GARDEN_TEST_PROBE, "1");
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal(process.env.PI_GARDEN_TEST_PROBE, "1", "await 之后补丁仍在（回归：finally 不得提前还原）");
+  });
+  assert.equal(process.env.PI_GARDEN_TEST_PROBE, undefined, "结束后已还原");
+});
 
 test("readConfig: 默认值 / 停用 / live 间隔 / 选择器全文开关 / 导出级别", () => {
   assert.deepEqual(readConfig({}), { enabled: true, liveIntervalMs: 60_000, selectorFullText: true, levels: ["l1", "l3"] });
@@ -157,8 +168,8 @@ test("扩展: agent_settled live 防抖", async () => {
   }
 });
 
-test("扩展: PI_GARDEN=0 完全停用", () => {
-  withEnv({ PI_GARDEN: "0" }, () => {
+test("扩展: PI_GARDEN=0 完全停用", async () => {
+  await withEnv({ PI_GARDEN: "0" }, async () => {
     const { pi, handlers, commands } = mockPi();
     garden(pi as any);
     assert.equal(handlers.size, 0);
