@@ -8,11 +8,15 @@ garden 是单向的格式转换器：pi 的 session jsonl → 四级 markdown �
 ┌────────────────────────────────────────────────────────────┐
 │ pi (coding agent)                                          │
 │   持续追加 ~/.pi/agent/sessions/--<cwd 转义>--/*.jsonl      │
+│      │                                                     │
+│      └─ extensions/garden.ts（pi 扩展，会话事件触发）        │
+│         session_start / agent_settled(防抖) /              │
+│         session_compact / session_shutdown / /garden       │
 └────────────────────────────────────────────────────────────┘
                      │  （sessions 在本机是软链 → /mnt/d/sd/_pi/sessions）
                      ▼
 ┌────────────────────────────────────────────────────────────┐
-│ garden CLI（src/cli.ts）                                    │
+│ garden 转换核心（src/cli.ts，CLI 与扩展共用）                │
 │                                                            │
 │   collectJobs    扫描 sessions 目录（子目录/*.jsonl，一层） │
 │   prepareGroup   按子目录分组：全量解析 + naming.ts 命名    │
@@ -42,6 +46,9 @@ garden 是单向的格式转换器：pi 的 session jsonl → 四级 markdown �
 
 | 模块 | 职责 |
 |------|------|
+| `extensions/garden.ts` | pi 扩展适配层：转换事件接线、`/garden` 快速选择器、`/gardener-output`、`/gardener-open`；逻辑全部委托 src/ |
+| `src/session-list.ts` | `/garden` 选择器数据源：头部快读 + garden frontmatter 富化（见 wiki/internals/reference/extension.md） |
+| `src/open.ts` | gardener-open：级别选择、平台检测、打开命令 |
 | `src/cli.ts` | 参数、目录扫描、命名计划、旧文件清理、增量判断、写盘 |
 | `src/naming.ts` | 输出文件命名：本地日期 + 组内序号 + slug（session_info.name → untitled 兜底） |
 | `src/parser.ts` | jsonl → Entry[]；容忍 append 到一半的残缺末行 |
@@ -70,4 +77,5 @@ garden 是单向的格式转换器：pi 的 session jsonl → 四级 markdown �
   不会被转换（2026-09-14 发现，待决策是否递归）。
 - 同一目录出现两个 session id 相同的 jsonl 时（pi 实际不会产生），旧文件清理可能
   误删对方输出（清理只按 frontmatter session_id 匹配）。
-- 未来方向（未实现）：接入 pi 扩展在 session 保存时自动转换、watch 模式。
+- 扩展只转换**当前会话**的文件；全量回填用 CLI 或 `/gardener-output all`。
+- 未来方向（未实现）：watch 模式（脱离 pi 生命周期的独立守护）。
