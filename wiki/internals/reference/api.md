@@ -59,14 +59,15 @@
 |------|------|
 | `collectJobs(input) => { jobs, defaultOut }` | 扫描 sessions 目录 |
 | `pathsForFile(src) => { sub, outRoot }` | 单文件路径推导：`.../sessions/<sub>/<file>.jsonl` → `<root>/garden`（纯推导，不校验布局） |
-| `processFile(src, sub, outRoot) => { written, skipped }` | 转换单个 session（含增量判断） |
+| `processFile(prepared, outDir, levels?) => { written, skipped }` | 渲染并写出单个 session 的级别文件（含增量判断）；`levels` 缺省 `DEFAULT_LEVELS` |
+| `DEFAULT_LEVELS` / `parseLevels(raw)` | 默认导出级别 `["l1","l3"]`；解析 `"l1,l3"` 形式（非法项忽略，全非法 → `undefined` 回退默认） |
 | `isUpToDate(outPath, srcMtime) => boolean` | mtime + 版本标记双重判断 |
 
 ## session-list.ts（快速 session 列表，供 `/garden` 选择器；数据源 = garden md，不读 jsonl）
 
 | 导出 | 说明 |
 |------|------|
-| `listProjectSessions(gardenDir, opts?) => Promise<SessionListItem[]>` | current scope：一层 `*.lN.md`，每 base 优选 l2>l3>l1>l0，一次有界读 |
+| `listProjectSessions(gardenDir, opts?) => Promise<SessionListItem[]>` | current scope：一层 `*.lN.md`，每 base 优选 l3>l2>l1>l0，一次有界读 |
 | `listAllSessions(gardenRoot, opts?) => Promise<SessionListItem[]>` | all scope：全部子目录（含 symlink 目录，跳过隐藏目录），子目录间并发 |
 | `parseGardenFrontmatter(text) => GardenFrontmatter` | 解析 frontmatter：sessionId / name / cwd / started / ended / source / parent_session / messageCount（各 role 求和） |
 | `extractFirstUserMessage(body) => string \| undefined` | 首个 `## 🙋 User` 小节正文（上限 300 字符） |

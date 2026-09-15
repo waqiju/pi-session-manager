@@ -14,6 +14,10 @@ garden 把同一个 session 渲染成四级 markdown，类似 LOD（Level of Det
 
 经验法则：**先读 l3/l2 找剧情，再读 l1 查细节，最后才翻 l0 对原文。**
 
+默认只导出 **l1 + l3**（2026-09-15 决策：l0 与源 jsonl 冗余、l2 语料与 l3 重叠，
+四级全导磁盘占用 ~3.5 倍）。可用 `PI_GARDEN_LEVELS`（扩展）或 `--levels`（CLI）
+调整；`/gardener-open lN` 指定未导出的级别时会按需只生成该级别。
+
 ## 取舍表
 
 | 内容 | l0 | l1 | l2 | l3 |

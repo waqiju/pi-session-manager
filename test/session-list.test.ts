@@ -158,12 +158,16 @@ test("listProjectSessions: 从 md 重建 item（路径/计数/firstMessage/paren
   }
 });
 
-test("listProjectSessions: 级别优选 l2；同 session 去重（新命名优先，再比 mtime）", async () => {
+test("listProjectSessions: 级别优选 l3 > l2 > l1 > l0；同 session 去重（新命名优先，再比 mtime）", async () => {
   const { root, gardenDir } = setup();
   try {
-    // 同 base 多级别：l0 与 l2 → 用 l2 的正文
+    // 同 base 多级别：l0/l1/l2/l3 齐全 → 用 l3 的正文
     writeFileSync(path.join(gardenDir, "2026-09-14-001-甲.l0.md"), buildMd({ session_id: "aaaa", source: "a.jsonl" }, "\nl0 独有词\n"));
     writeFileSync(path.join(gardenDir, "2026-09-14-001-甲.l2.md"), buildMd({ session_id: "aaaa", source: "a.jsonl" }, "\nl2 独有词\n"));
+    writeFileSync(path.join(gardenDir, "2026-09-14-001-甲.l3.md"), buildMd({ session_id: "aaaa", source: "a.jsonl" }, "\nl3 独有词\n"));
+    // 缺 l3 时退化 l2（l2 > l1 > l0）
+    writeFileSync(path.join(gardenDir, "2026-09-14-005-丁.l0.md"), buildMd({ session_id: "dddd", source: "d.jsonl" }, "\nd-l0 独有词\n"));
+    writeFileSync(path.join(gardenDir, "2026-09-14-005-丁.l2.md"), buildMd({ session_id: "dddd", source: "d.jsonl" }, "\nd-l2 独有词\n"));
     // 同 session 两个 base（改名残留）：都是新命名 → mtime 新者胜
     writeFileSync(path.join(gardenDir, "2026-09-14-002-旧名.l2.md"), buildMd({ session_id: "bbbb", source: "b.jsonl", name: "旧名" }));
     writeFileSync(path.join(gardenDir, "2026-09-14-003-新名.l2.md"), buildMd({ session_id: "bbbb", source: "b.jsonl", name: "新名" }));
@@ -177,8 +181,10 @@ test("listProjectSessions: 级别优选 l2；同 session 去重（新命名优�
     utimesSync(path.join(gardenDir, "2026-09-14T01-00-00_cccc.l2.md"), newer, newer); // 旧风格 mtime 更新也不应赢
 
     const items = await listProjectSessions(gardenDir);
-    assert.equal(items.length, 3);
-    assert.ok(items.find((i) => i.id === "aaaa")!.allMessagesText.includes("l2 独有词"), "同 base 优选 l2");
+    assert.equal(items.length, 4);
+    assert.ok(items.find((i) => i.id === "aaaa")!.allMessagesText.includes("l3 独有词"), "同 base 优选 l3");
+    assert.ok(!items.find((i) => i.id === "aaaa")!.allMessagesText.includes("l2 独有词"), "有 l3 时不应取 l2");
+    assert.ok(items.find((i) => i.id === "dddd")!.allMessagesText.includes("d-l2 独有词"), "缺 l3 退化 l2");
     assert.equal(items.find((i) => i.id === "bbbb")!.name, "新名", "同风格残留取 mtime 新者");
     assert.equal(items.find((i) => i.id === "cccc")!.name, "新风格", "新命名风格优先");
   } finally {

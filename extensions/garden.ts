@@ -1,7 +1,8 @@
 /**
  * garden — pi 扩展。
  *
- * 一、自动转换：会话生命周期内把当前 session .jsonl 转成三级 markdown（l0/l1/l2）。
+ * 一、自动转换：会话生命周期内把当前 session .jsonl 转成四级 markdown（l0/l1/l2/l3，
+ *   默认只导 l1/l3，PI_GARDEN_LEVELS 配置）。
  *   渲染核心在 ../src（CLI 同源），这里只做事件接线：
  *     session_start    → 补漏（crash / kill 后恢复）
  *     agent_settled    → live 转换（防抖，默认 60s，PI_GARDEN_LIVE_INTERVAL_S 调整，0 关闭）
@@ -19,6 +20,8 @@
  *
  * 配置（env）：
  *   PI_GARDEN=0                     完全停用本扩展
+ *   PI_GARDEN_LEVELS=l1,l3          导出级别（逗号分隔，子集 l0/l1/l2/l3；默认 l1,l3。
+ *                                   l0 与源 jsonl 冗余、l2 语料与 l3 重叠，按需再导）
  *   PI_GARDEN_LIVE_INTERVAL_S=60    live 转换最小间隔（秒，可小数）；0 = 关闭 live 触发
  *   PI_GARDEN_OPEN_CMD              自定义打开命令（空格切分；{file} 占位，缺省追加为末参）
  *   PI_GARDEN_SELECTOR_FULLTEXT=1   /garden 选择器用 garden md 正文回填全文搜索语料；
@@ -32,7 +35,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { collectJobs, pathsForFile, prepareGroup, processFile } from "../src/cli.ts";
+import { collectJobs, DEFAULT_LEVELS, parseLevels, pathsForFile, prepareGroup, processFile, type LevelName } from "../src/cli.ts";
 import { GARDEN_LEVELS, isGardenLevel, openFile, pickHighestLevelFile, type GardenLevel } from "../src/open.ts";
 import { gardenDirForSessionDir, gardenRootForSessionDir, listAllSessions, listProjectSessions } from "../src/session-list.ts";
 import { GardenSelectorComponent, deleteGardenOutputs, deleteSessionFile } from "./garden-selector.ts";
@@ -43,6 +46,8 @@ export interface GardenConfig {
   liveIntervalMs: number;
   /** /garden 选择器是否用 garden md 正文作全文搜索语料（默认开） */
   selectorFullText: boolean;
+  /** 导出级别子集（默认 l1,l3） */
+  levels: readonly LevelName[];
 }
 
 export function readConfig(env: NodeJS.ProcessEnv): GardenConfig {
@@ -54,7 +59,8 @@ export function readConfig(env: NodeJS.ProcessEnv): GardenConfig {
     liveIntervalMs = Number.isFinite(n) && n > 0 ? n * 1000 : 0;
   }
   const selectorFullText = (env.PI_GARDEN_SELECTOR_FULLTEXT ?? "").trim() !== "0";
-  return { enabled: !off, liveIntervalMs, selectorFullText };
+  const levels = parseLevels(env.PI_GARDEN_LEVELS) ?? DEFAULT_LEVELS;
+  return { enabled: !off, liveIntervalMs, selectorFullText, levels };
 }
 
 /**
@@ -69,13 +75,13 @@ export function gardenPathsFor(sessionFile: string): { sub: string; outRoot: str
 }
 
 /** 转换单个 session 文件；非常规布局或文件不存在返回 null。base = 输出文件名主体（重命名后选择器同步用） */
-export function convertSessionFile(sessionFile: string): { written: string[]; skipped: string[]; base: string } | null {
+export function convertSessionFile(sessionFile: string, levels: readonly LevelName[] = DEFAULT_LEVELS): { written: string[]; skipped: string[]; base: string } | null {
   const p = gardenPathsFor(sessionFile);
   if (!p || !existsSync(sessionFile)) return null;
   const outDir = path.join(p.outRoot, p.sub);
   const prepared = prepareGroup([{ src: sessionFile, sub: p.sub }], () => {});
   if (prepared.length === 0) return null;
-  return { ...processFile(prepared[0], outDir), base: prepared[0].base };
+  return { ...processFile(prepared[0], outDir, levels), base: prepared[0].base };
 }
 
 export default function (pi: ExtensionAPI) {
@@ -95,7 +101,7 @@ export default function (pi: ExtensionAPI) {
     if (!file) return null; // ephemeral session，无文件可转
     lastConvertAt = Date.now();
     try {
-      const res = convertSessionFile(file);
+      const res = convertSessionFile(file, cfg.levels);
       if (!res) return null; // 非常规布局，静默跳过
       lastErrorMsg = "";
       return res.written.length ? `garden: 已更新 ${res.written.map((l) => `.${l}.md`).join(" ")}` : "garden: 已是最新";
@@ -143,7 +149,7 @@ export default function (pi: ExtensionAPI) {
         const prepared = prepareGroup(jobs, () => { failed++; });
         for (const p of prepared) {
           try {
-            if (processFile(p, path.join(defaultOut, p.job.sub)).written.length) updated++;
+            if (processFile(p, path.join(defaultOut, p.job.sub), cfg.levels).written.length) updated++;
           } catch {
             failed++;
           }
@@ -184,8 +190,12 @@ export default function (pi: ExtensionAPI) {
         if (prepared.length > 0) computeBase = () => prepared[0].base;
       } catch { /* 命名失败时退回原始 basename */ }
       let target = pickHighestLevelFile(mdDir, computeBase(), level);
-      if (!target && !levelArg) convertCurrent(ctx); // 无产物：先转换再取（指定级别不存在时不白转）
-      if (!target) target = pickHighestLevelFile(mdDir, computeBase(), level);
+      if (!target) {
+        // 无产物时先转换再取：指定级别 → 不在默认导出集也只生成该级别；未指定 → 按配置转换
+        if (level) convertSessionFile(file, [level]);
+        else convertCurrent(ctx);
+        target = pickHighestLevelFile(mdDir, computeBase(), level);
+      }
       if (!target) {
         notify(ctx, `gardener-open: 无 ${levelArg || "任何级别"} 的输出文件`, "warning");
         return;

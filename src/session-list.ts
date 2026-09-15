@@ -2,7 +2,7 @@
  * 快速 session 列表：为 `/garden` 选择器供数。
  *
  * 数据源 = garden md 产物（不再读 sessions/*.jsonl；假设 garden 转换常驻、产物最新）：
- *   - 扫描 garden/<sub>/ 下的 *.lN.md，每个 base 取最优级别（l2 > l3 > l1 > l0）
+ *   - 扫描 garden/<sub>/ 下的 *.lN.md，每个 base 取最优级别（l3 > l2 > l1 > l0）
  *   - frontmatter → id / cwd / started / ended / name / messages 计数 / source / parent_session
  *   - 正文 → firstMessage（首个 `## 🙋 User` 小节）与 allMessagesText（全文搜索语料，
  *     `fullText:false` 时只读头部 4KB，退回只搜 id/name/cwd）
@@ -10,7 +10,7 @@
  *     switchSession；文件已删的可能性在选中时再校验，列表期零额外 syscall）
  *   - 无 source 字段的旧版产物跳过（/gardener-output all 回填后即出现）
  *
- * 性能：每 session 一次有界读（l2 平均 ~20KB，上限 1MB 防异常），并发 16；
+ * 性能：每 session 一次有界读（l3 平均 ~14KB，上限 1MB 防异常），并发 16；
  * 315 session ≈ 2-3s（drvfs 实测），且全程无 realpathSync。
  */
 
@@ -38,7 +38,7 @@ export interface SessionListItem {
   mdBase: string;
 }
 
-/** garden 正文读取上限（全文搜索语料；l2 平均 ~20KB，上限只是防异常大文件） */
+/** garden 正文读取上限（全文搜索语料；l3 平均 ~14KB，上限只是防异常大文件） */
 export const FULLTEXT_READ_BYTES = 1024 * 1024;
 /** 只取 frontmatter 时的读取上限（frontmatter 仅 ~20 行；顺带可能捕到首个 User 小节） */
 export const FRONTMATTER_READ_BYTES = 4096;
@@ -177,8 +177,8 @@ async function readBounded(filePath: string, maxBytes: number): Promise<string |
 
 /** 输出文件名：<base>.lN.md */
 const MD_FILE_RE = /^(.*)\.l(\d+)\.md$/;
-/** 选择器语料的级别性价比：l2（骨架+对话全文）最优；缺 l2 时退化 */
-const LEVEL_PICK: Record<string, number> = { l2: 4, l3: 3, l1: 2, l0: 1 };
+/** 选择器语料的级别性价比：l3（纯问答对话）与默认导出级别对齐，最优；缺 l3 时退化 l2 > l1 > l0 */
+const LEVEL_PICK: Record<string, number> = { l3: 4, l2: 3, l1: 2, l0: 1 };
 
 interface MdCandidate {
   base: string;
@@ -186,7 +186,7 @@ interface MdCandidate {
   level: string;
 }
 
-/** 同 base 多级别取最优（l2 > l3 > l1 > l0；未知级别最低） */
+/** 同 base 多级别取最优（l3 > l2 > l1 > l0；未知级别最低） */
 function pickBestPerBase(files: string[]): MdCandidate[] {
   const byBase = new Map<string, MdCandidate>();
   for (const f of files) {

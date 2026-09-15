@@ -22,18 +22,32 @@ const USAGE = `garden — 把 pi sessions (.jsonl) 转成四级 markdown (l0/l1/
   garden <sessions目录>      输出到其同级 garden/
   garden <xxx.jsonl>         单文件模式（编号仍参考同目录全部 session）
   garden ... -o <输出目录>   自定义输出目录
+  garden ... --levels l0,l1  指定导出级别（默认 l1,l3；也可用 env PI_GARDEN_LEVELS，flag 优先）
 
 命名: <本地日期>-<序号>-<slug>.<level>.md（slug = 会话名，无则 untitled）
 增量: 源文件 mtime 比输出新才重新生成。
 清理: 改名/重编号后，按 frontmatter session_id 匹配删除同 session 的旧文件。
 `;
 
-const LEVELS: { name: "l0" | "l1" | "l2" | "l3"; render: (h: SessionHeader | null, e: Entry[], o: { sourceName?: string }) => string }[] = [
+export type LevelName = "l0" | "l1" | "l2" | "l3";
+
+const LEVELS: { name: LevelName; render: (h: SessionHeader | null, e: Entry[], o: { sourceName?: string }) => string }[] = [
   { name: "l0", render: renderL0 },
   { name: "l1", render: renderL1 },
   { name: "l2", render: renderL2 },
   { name: "l3", render: renderL3 },
 ];
+
+/** 默认导出级别：l1（阅读主力）+ l3（问答视图）。l0 与源 jsonl 冗余、l2 语料与 l3 重叠，按需再导 */
+export const DEFAULT_LEVELS: readonly LevelName[] = ["l1", "l3"];
+
+/** 解析 "l1,l3" 形式的级别列表（逗号分隔、大小写不敏感、去重、保序）；空或全无有效项 → undefined（调用方回退默认） */
+export function parseLevels(raw: string | undefined): LevelName[] | undefined {
+  if (!raw || !raw.trim()) return undefined;
+  const valid = new Set<string>(LEVELS.map((l) => l.name));
+  const levels = [...new Set(raw.split(",").map((s) => s.trim().toLowerCase()).filter((s) => valid.has(s)))] as LevelName[];
+  return levels.length ? levels : undefined;
+}
 
 interface Job {
   src: string;
@@ -182,10 +196,11 @@ export function removeStaleOutputs(index: Map<string, string[]>, outDir: string,
   return removed;
 }
 
-export function processFile(p: Prepared, outDir: string): { written: string[]; skipped: string[] } {
+export function processFile(p: Prepared, outDir: string, levels: readonly LevelName[] = DEFAULT_LEVELS): { written: string[]; skipped: string[] } {
   const written: string[] = [];
   const skipped: string[] = [];
   for (const { name, render } of LEVELS) {
+    if (!levels.includes(name)) continue;
     const outPath = path.join(outDir, `${p.base}.${name}.md`);
     if (isUpToDate(outPath, p.srcMtime)) {
       skipped.push(name);
@@ -200,7 +215,7 @@ export function processFile(p: Prepared, outDir: string): { written: string[]; s
 
 function main(): void {
   const { values, positionals } = parseArgs({
-    options: { output: { type: "string", short: "o" }, help: { type: "boolean", short: "h" } },
+    options: { output: { type: "string", short: "o" }, levels: { type: "string" }, help: { type: "boolean", short: "h" } },
     allowPositionals: true,
   });
   if (values.help) {
@@ -214,7 +229,8 @@ function main(): void {
   }
   const { jobs, target, defaultOut } = collectJobs(input);
   const outRoot = path.resolve(values.output ?? defaultOut);
-  console.log(`garden: ${target ? 1 : jobs.length} 个 session → ${outRoot}`);
+  const levels = parseLevels(values.levels) ?? parseLevels(process.env.PI_GARDEN_LEVELS) ?? DEFAULT_LEVELS;
+  console.log(`garden: ${target ? 1 : jobs.length} 个 session → ${outRoot}（级别 ${levels.join(",")}）`);
 
   // 编号是同目录内的全局属性 → 按子目录分组，组内统一解析 + 命名计划
   const groups = new Map<string, Job[]>();
@@ -240,7 +256,7 @@ function main(): void {
       const rel = path.join(sub, path.basename(p.job.src));
       try {
         removed += removeStaleOutputs(index, outDir, p.id, p.base);
-        const { written } = processFile(p, outDir);
+        const { written } = processFile(p, outDir, levels);
         if (written.length) {
           updated++;
           console.log(`  ✓ ${rel} → ${p.base} (${written.map((l) => `.${l}.md`).join(" ")})`);

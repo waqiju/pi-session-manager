@@ -1,6 +1,6 @@
 # Extension 字典（extensions/garden.ts）
 
-pi 扩展形态：会话生命周期内自动把**当前 session** 转成三级 markdown。
+pi 扩展形态：会话生命周期内自动把**当前 session** 转成四级 markdown（默认只导 l1/l3，`PI_GARDEN_LEVELS` 配置）。
 渲染核心在 `src/`（与 CLI 同源），扩展只做事件接线，因此输出、增量语义与 CLI 完全一致。
 
 ## 安装
@@ -30,7 +30,7 @@ ephemeral session（无 session 文件）静默跳过；非常规路径布局（
 | `/garden` | 快速 session 选择器（等位 /resume，见下节） |
 | `/gardener-output` | 立即转换当前 session，notify 结果 |
 | `/gardener-output all` | 全量回填整个 sessions 树（等价 CLI 目录模式） |
-| `/gardener-open [lN]` | 默认浏览器打开当前 session 的 garden md；默认取存在的最高级别（l3>l2>l1>l0），可指定级别；无产物时先转换再开 |
+| `/gardener-open [lN]` | 默认浏览器打开当前 session 的 garden md；默认取存在的最高级别（l3>l2>l1>l0），可指定级别；无产物时先转换再开（指定的级别不在默认导出集时，按需只生成该级别） |
 
 ## /garden 快速选择器
 
@@ -52,7 +52,7 @@ node --test 可直测（test/garden-selector.test.ts）。
 
 只读 garden 产物，不再读 jsonl（假设转换常驻、产物最新）：
 
-- 每个 base 取最优级别（l2 > l3 > l1 > l0），一次有界读（正文上限 1MB，仅 frontmatter 时 4KB）；
+- 每个 base 取最优级别（l3 > l2 > l1 > l0，与默认导出级别对齐），一次有界读（正文上限 1MB，仅 frontmatter 时 4KB）；
   frontmatter 提供 id / cwd / started / ended / name / messages 计数 / `source`（jsonl 文件名）
   / `parent_session`（fork 链）；正文提供 firstMessage（首个 `## 🙋 User` 小节）与
   allMessagesText（全文搜索语料，`PI_GARDEN_SELECTOR_FULLTEXT=0` 关闭）。
@@ -85,6 +85,7 @@ session_id 清全部 md 产物；内存移除，**不做内建那样的全量重
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `PI_GARDEN` | `1` | `0` = 完全停用扩展（不注册任何事件/命令） |
+| `PI_GARDEN_LEVELS` | `l1,l3` | 导出级别（逗号分隔，子集 `l0/l1/l2/l3`，大小写不敏感；全部非法回退默认）。l0 与源 jsonl 冗余、l2 语料与 l3 重叠，默认不导；旧配置产出的其他级别文件按归档语义保留，不会自动清理 |
 | `PI_GARDEN_LIVE_INTERVAL_S` | `60` | live 触发最小间隔（秒，可小数）；`0` = 关闭 live 触发 |
 | `PI_GARDEN_OPEN_CMD` | 平台默认 | 自定义打开命令；空格切分，含 `{file}` 替换否则追加为末参。平台默认：WSL `wslpath -w` + `cmd.exe /c start`，Linux `xdg-open`，macOS `open` |
 | `PI_GARDEN_SELECTOR_FULLTEXT` | `1` | `/garden` 选择器用 garden md 正文作全文搜索语料；`0` = 关闭（退回只搜 id/name/cwd） |

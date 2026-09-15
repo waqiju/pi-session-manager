@@ -29,25 +29,22 @@ function sessionJsonl(id: string, timestamp: string, name?: string): string {
   return lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
 }
 
-test("CLI: 目录模式生成四级 markdown，增量跳过", () => {
+test("CLI: 目录模式默认只导出 l1/l3，增量跳过", () => {
   const { root, sessionsDir } = setup();
   try {
     const out1 = execFileSync(process.execPath, [CLI, sessionsDir], { encoding: "utf8" });
     assert.ok(out1.includes("1 个 session"), out1);
     assert.ok(out1.includes("1 更新"), out1);
+    assert.ok(out1.includes("级别 l1,l3"), out1);
 
     const gardenDir = path.join(root, "garden", "--tmp-proj--");
     const l0 = path.join(gardenDir, `${SAMPLE_BASE}.l0.md`);
     const l1 = path.join(gardenDir, `${SAMPLE_BASE}.l1.md`);
     const l2 = path.join(gardenDir, `${SAMPLE_BASE}.l2.md`);
     const l3 = path.join(gardenDir, `${SAMPLE_BASE}.l3.md`);
-    for (const f of [l0, l1, l2, l3]) assert.ok(existsSync(f), `应生成 ${f}`);
-
-    const s0 = readFileSync(l0, "utf8");
-    const s1 = readFileSync(l1, "utf8");
-    const s2 = readFileSync(l2, "utf8");
-    const s3 = readFileSync(l3, "utf8");
-    assert.ok(s0.length > s1.length && s1.length > s2.length && s2.length > s3.length, "l0 > l1 > l2 > l3");
+    assert.ok(existsSync(l1) && existsSync(l3), "默认应生成 l1/l3");
+    assert.ok(!existsSync(l0) && !existsSync(l2), "默认不生成 l0/l2");
+    assert.ok(readFileSync(l1, "utf8").length > readFileSync(l3, "utf8").length, "l1 > l3");
 
     // 第二次运行：全部跳过
     const out2 = execFileSync(process.execPath, [CLI, sessionsDir], { encoding: "utf8" });
@@ -55,15 +52,55 @@ test("CLI: 目录模式生成四级 markdown，增量跳过", () => {
     assert.ok(out2.includes("1 已是最新"), out2);
 
     // 版本标记被移除 → 重新生成（逻辑变更自动全量刷新的依据）
-    const old = readFileSync(l0, "utf8").replace(/^version: "[^"]+"$/m, "version: \"0.0.0-old\"");
-    writeFileSync(l0, old);
+    const old = readFileSync(l1, "utf8").replace(/^version: "[^"]+"$/m, "version: \"0.0.0-old\"");
+    writeFileSync(l1, old);
     const out3 = execFileSync(process.execPath, [CLI, sessionsDir], { encoding: "utf8" });
     assert.ok(out3.includes("1 更新"), out3);
-    const refreshed = readFileSync(l0, "utf8");
+    const refreshed = readFileSync(l1, "utf8");
     assert.ok(refreshed.includes(`version: "${GARDEN_VERSION}"`), "应重新生成并恢复当前版本标记");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("CLI: --levels 与 PI_GARDEN_LEVELS 控制导出级别（flag > env > 默认）", () => {
+  // 每次用独立 root（避免增量跳过干扰存在性断言），返回级别文件存在/大小查询函数
+  const run = (args: string[], envPatch?: Record<string, string>) => {
+    const { root, sessionsDir } = setup();
+    try {
+      const env = { ...process.env };
+      delete env.PI_GARDEN_LEVELS;
+      if (envPatch) Object.assign(env, envPatch);
+      execFileSync(process.execPath, [CLI, sessionsDir, ...args], { encoding: "utf8", env });
+      const gardenDir = path.join(root, "garden", "--tmp-proj--");
+      // finally 清理 root 前先取快照（返回闭包会在清理后才被调用）
+      const snap: Record<string, { has: boolean; size: number }> = {};
+      for (const l of ["l0", "l1", "l2", "l3"]) {
+        const p = path.join(gardenDir, `${SAMPLE_BASE}.${l}.md`);
+        snap[l] = { has: existsSync(p), size: existsSync(p) ? readFileSync(p, "utf8").length : 0 };
+      }
+      return snap;
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  // flag 指定全量四级（顺带验证体积排序）
+  const all = run(["--levels", "l0,l1,l2,l3"]);
+  for (const l of ["l0", "l1", "l2", "l3"]) assert.ok(all[l].has, `--levels 全量应生成 ${l}`);
+  assert.ok(all.l0.size > all.l1.size && all.l1.size > all.l2.size && all.l2.size > all.l3.size, "l0 > l1 > l2 > l3");
+
+  // env 生效
+  const byEnv = run([], { PI_GARDEN_LEVELS: "l0" });
+  assert.ok(byEnv.l0.has && !byEnv.l1.has && !byEnv.l3.has, "env 应控制导出级别");
+
+  // flag 覆盖 env
+  const flagWins = run(["--levels", "l2"], { PI_GARDEN_LEVELS: "l0" });
+  assert.ok(flagWins.l2.has && !flagWins.l0.has, "flag 应覆盖 env");
+
+  // 非法级别（含全部非法）回退默认 l1,l3
+  const fallback = run(["--levels", "l9, x"]);
+  assert.ok(fallback.l1.has && fallback.l3.has && !fallback.l0.has, "非法值应回退默认");
 });
 
 test("CLI: 单文件模式 + -o", () => {
@@ -73,7 +110,7 @@ test("CLI: 单文件模式 + -o", () => {
     const outDir = path.join(root, "out");
     const out = execFileSync(process.execPath, [CLI, src, "-o", outDir], { encoding: "utf8" });
     assert.ok(out.includes("1 更新"), out);
-    assert.ok(existsSync(path.join(outDir, "--tmp-proj--", `${SAMPLE_BASE}.l0.md`)));
+    assert.ok(existsSync(path.join(outDir, "--tmp-proj--", `${SAMPLE_BASE}.l1.md`)));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -91,25 +128,25 @@ test("CLI: 同日按时间编号；插入更早 session 后重编号并清理旧
 
   const d = localDate("2026-09-14T12:10:00.000Z");
   const gardenDir = path.join(root, "garden", "--tmp-proj--");
-  const l2 = (base: string) => path.join(gardenDir, `${base}.l2.md`);
+  const l1 = (base: string) => path.join(gardenDir, `${base}.l1.md`);
   try {
     execFileSync(process.execPath, [CLI, sessionsDir], { encoding: "utf8" });
-    assert.ok(existsSync(l2(`${d}-001-alpha`)));
-    assert.ok(existsSync(l2(`${d}-002-my_session`))); // 空格 → _
-    assert.ok(existsSync(l2(`${d}-003-untitled`))); // 无名 → untitled
+    assert.ok(existsSync(l1(`${d}-001-alpha`)));
+    assert.ok(existsSync(l1(`${d}-002-my_session`))); // 空格 → _
+    assert.ok(existsSync(l1(`${d}-003-untitled`))); // 无名 → untitled
 
     // 插入更早的 session → 后面全部重编号
     writeFileSync(path.join(subDir, "2026-09-14T12-00-00_z.jsonl"), sessionJsonl("uuid-z", "2026-09-14T12:00:00.000Z", "zero"));
     const out2 = execFileSync(process.execPath, [CLI, sessionsDir], { encoding: "utf8" });
-    assert.ok(existsSync(l2(`${d}-001-zero`)));
-    assert.ok(existsSync(l2(`${d}-002-alpha`)));
-    assert.ok(existsSync(l2(`${d}-003-my_session`)));
-    assert.ok(existsSync(l2(`${d}-004-untitled`)));
-    // 旧编号文件（3 session × 4 级别 = 12 个）被按 uuid 清理
-    assert.ok(!existsSync(l2(`${d}-001-alpha`)), "旧编号应被清理");
-    assert.ok(!existsSync(l2(`${d}-002-my_session`)), "旧编号应被清理");
-    assert.ok(!existsSync(l2(`${d}-003-untitled`)), "旧编号应被清理");
-    assert.ok(out2.includes("清理 12 个旧文件"), out2);
+    assert.ok(existsSync(l1(`${d}-001-zero`)));
+    assert.ok(existsSync(l1(`${d}-002-alpha`)));
+    assert.ok(existsSync(l1(`${d}-003-my_session`)));
+    assert.ok(existsSync(l1(`${d}-004-untitled`)));
+    // 旧编号文件（3 session × 默认 2 级别 = 6 个）被按 uuid 清理
+    assert.ok(!existsSync(l1(`${d}-001-alpha`)), "旧编号应被清理");
+    assert.ok(!existsSync(l1(`${d}-002-my_session`)), "旧编号应被清理");
+    assert.ok(!existsSync(l1(`${d}-003-untitled`)), "旧编号应被清理");
+    assert.ok(out2.includes("清理 6 个旧文件"), out2);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

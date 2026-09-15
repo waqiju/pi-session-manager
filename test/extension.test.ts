@@ -53,13 +53,18 @@ function withEnv<T>(patch: Record<string, string | undefined>, fn: () => T): T {
   }
 }
 
-test("readConfig: 默认值 / 停用 / live 间隔 / 选择器全文开关", () => {
-  assert.deepEqual(readConfig({}), { enabled: true, liveIntervalMs: 60_000, selectorFullText: true });
-  assert.deepEqual(readConfig({ PI_GARDEN: "0" }), { enabled: false, liveIntervalMs: 60_000, selectorFullText: true });
-  assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "0" }), { enabled: true, liveIntervalMs: 0, selectorFullText: true });
-  assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "2.5" }), { enabled: true, liveIntervalMs: 2500, selectorFullText: true });
-  assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "abc" }), { enabled: true, liveIntervalMs: 0, selectorFullText: true });
-  assert.deepEqual(readConfig({ PI_GARDEN_SELECTOR_FULLTEXT: "0" }), { enabled: true, liveIntervalMs: 60_000, selectorFullText: false });
+test("readConfig: 默认值 / 停用 / live 间隔 / 选择器全文开关 / 导出级别", () => {
+  assert.deepEqual(readConfig({}), { enabled: true, liveIntervalMs: 60_000, selectorFullText: true, levels: ["l1", "l3"] });
+  assert.deepEqual(readConfig({ PI_GARDEN: "0" }), { enabled: false, liveIntervalMs: 60_000, selectorFullText: true, levels: ["l1", "l3"] });
+  assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "0" }), { enabled: true, liveIntervalMs: 0, selectorFullText: true, levels: ["l1", "l3"] });
+  assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "2.5" }), { enabled: true, liveIntervalMs: 2500, selectorFullText: true, levels: ["l1", "l3"] });
+  assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "abc" }), { enabled: true, liveIntervalMs: 0, selectorFullText: true, levels: ["l1", "l3"] });
+  assert.deepEqual(readConfig({ PI_GARDEN_SELECTOR_FULLTEXT: "0" }), { enabled: true, liveIntervalMs: 60_000, selectorFullText: false, levels: ["l1", "l3"] });
+  // PI_GARDEN_LEVELS：大小写不敏感、去重、保序；全部非法回退默认
+  assert.deepEqual(readConfig({ PI_GARDEN_LEVELS: "l0,l2" }).levels, ["l0", "l2"]);
+  assert.deepEqual(readConfig({ PI_GARDEN_LEVELS: " L3, l1 ,l3 " }).levels, ["l3", "l1"]);
+  assert.deepEqual(readConfig({ PI_GARDEN_LEVELS: "l9" }).levels, ["l1", "l3"]);
+  assert.deepEqual(readConfig({ PI_GARDEN_LEVELS: "" }).levels, ["l1", "l3"]);
 });
 
 test("gardenPathsFor: 只接受 pi 标准 sessions 布局", () => {
@@ -72,13 +77,18 @@ test("gardenPathsFor: 只接受 pi 标准 sessions 布局", () => {
 
 const SAMPLE_BASE = "2026-09-14-001-garden_开发会话";
 
-test("convertSessionFile: 生成四级输出", () => {
+test("convertSessionFile: 默认导出 l1/l3；levels 参数可指定", () => {
   const { root, sessionFile } = setup();
   try {
     const res = convertSessionFile(sessionFile);
-    assert.ok(res && res.written.length === 4, `expected 4 written, got ${res?.written.length}`);
+    assert.ok(res && res.written.length === 2, `expected 2 written, got ${res?.written.length}`);
     const dir = path.join(root, "garden", "--tmp-proj--");
-    for (const l of ["l0", "l1", "l2", "l3"]) assert.ok(existsSync(path.join(dir, `${SAMPLE_BASE}.${l}.md`)), `missing .${l}.md`);
+    for (const l of ["l1", "l3"]) assert.ok(existsSync(path.join(dir, `${SAMPLE_BASE}.${l}.md`)), `missing .${l}.md`);
+    for (const l of ["l0", "l2"]) assert.ok(!existsSync(path.join(dir, `${SAMPLE_BASE}.${l}.md`)), `默认不应生成 .${l}.md`);
+    // 显式指定默认不导出的级别
+    const res2 = convertSessionFile(sessionFile, ["l0"]);
+    assert.deepEqual(res2?.written, ["l0"]);
+    assert.ok(existsSync(path.join(dir, `${SAMPLE_BASE}.l0.md`)));
     assert.equal(convertSessionFile(path.join(root, "sessions", "s.jsonl")), null); // 布局不符
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -93,18 +103,18 @@ test("扩展: session_shutdown / session_compact / session_start 触发转换", 
       garden(pi as any);
       const logs: string[] = [];
       const ctx = mockCtx(sessionFile, logs);
-      const l2 = path.join(root, "garden", "--tmp-proj--", `${SAMPLE_BASE}.l2.md`);
+      const l1 = path.join(root, "garden", "--tmp-proj--", `${SAMPLE_BASE}.l1.md`);
       {
         await handlers.get("session_shutdown")!({}, ctx);
-        assert.ok(existsSync(l2), "shutdown 应触发转换");
+        assert.ok(existsSync(l1), "shutdown 应触发转换");
 
-        unlinkSync(l2);
+        unlinkSync(l1);
         await handlers.get("session_compact")!({}, ctx);
-        assert.ok(existsSync(l2), "compact 应触发转换");
+        assert.ok(existsSync(l1), "compact 应触发转换");
 
-        unlinkSync(l2);
+        unlinkSync(l1);
         await handlers.get("session_start")!({}, ctx);
-        assert.ok(existsSync(l2), "start 应触发转换");
+        assert.ok(existsSync(l1), "start 应触发转换");
 
         // ephemeral session：无文件，静默不抛错
         await handlers.get("session_shutdown")!({}, mockCtx(undefined, logs));
@@ -126,20 +136,20 @@ test("扩展: agent_settled live 防抖", async () => {
       const { pi, handlers } = mockPi();
       garden(pi as any);
       const ctx = mockCtx(sessionFile, []);
-      const l2 = path.join(root, "garden", "--tmp-proj--", `${SAMPLE_BASE}.l2.md`);
+      const l1 = path.join(root, "garden", "--tmp-proj--", `${SAMPLE_BASE}.l1.md`);
       const settle = () => handlers.get("agent_settled")!({}, ctx);
 
       await settle(); // 首次：转换
-      assert.ok(existsSync(l2));
+      assert.ok(existsSync(l1));
 
-      unlinkSync(l2);
+      unlinkSync(l1);
       now += 10_000; // +10s < 60s：防抖跳过
       await settle();
-      assert.ok(!existsSync(l2), "间隔内不应重复转换");
+      assert.ok(!existsSync(l1), "间隔内不应重复转换");
 
       now += 61_000; // +61s > 60s：再次转换
       await settle();
-      assert.ok(existsSync(l2));
+      assert.ok(existsSync(l1));
     });
   } finally {
     Date.now = realNow;
@@ -168,7 +178,7 @@ test("扩展: /gardener-output 与 /gardener-output all 命令", async () => {
       await cmd.handler("", ctx);
       const last = logs.at(-1)!;
       assert.ok(last.includes("已更新"), last);
-      assert.ok(last.includes(".l3.md") || last.includes(".l2.md"), last);
+      assert.ok(last.includes(".l1.md") && last.includes(".l3.md"), last);
 
       await cmd.handler("", ctx); // 第二次：增量跳过
       assert.ok(logs.at(-1)?.includes("已是最新"), logs.join());
@@ -198,7 +208,7 @@ test("扩展: /gardener-open 转换后打开最高级别 + 级别参数校验", 
       assert.ok(logs.at(-1)?.includes("已打开"), logs.join());
       assert.ok(logs.at(-1)?.includes(".l3.md"), logs.join());
 
-      await cmd.handler("l0", ctx); // 指定级别
+      await cmd.handler("l0", ctx); // 指定默认不导出的级别：按需即时生成再打开
       assert.ok(logs.at(-1)?.includes(".l0.md"), logs.join());
 
       await cmd.handler("l3", ctx); // 指定级别存在

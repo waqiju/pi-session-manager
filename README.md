@@ -42,7 +42,8 @@ canonicalizePath 会卡 ~22s；`PI_GARDEN_SELECTOR=builtin` 可回退官方组�
 | `xxx.l2.md` | 剧情骨架（prompt + assistant text 全量交织 + 工具一行摘要） |
 | `xxx.l3.md` | 纯问答对话（l2 基础上每轮只留最终答复） |
 
-每份文件带 YAML frontmatter（session id、cwd、起止时间、模型、token/成本汇总）。
+默认只导出 l1 + l3（l0 与源 jsonl 冗余、l2 语料与 l3 重叠）；用 `PI_GARDEN_LEVELS=l0,l1,l2,l3`
+或 CLI `--levels` 调整。每份文件带 YAML frontmatter（session id、cwd、起止时间、模型、token/成本汇总）。
 
 ## 文档
 
