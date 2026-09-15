@@ -55,6 +55,8 @@ export interface SelectorOptions {
   onCancel: () => void;
   /** 重命名（pi SessionManager.appendSessionInfo 同路径）；成功返回新 mdBase（可选） */
   renameSession?: (item: SessionListItem, name: string) => Promise<string | undefined>;
+  /** 新建子 session（parentSession = 选中项；空 session，pi 自动切换过去） */
+  onNewChild?: (item: SessionListItem) => void;
   /** 删除（jsonl + garden md 产物）；返回 ok/error */
   deleteSession?: (item: SessionListItem) => Promise<{ ok: boolean; error?: string }>;
   /** 终端高度（可选，用于自适应 maxVisible）；不传则回退 process.stdout.rows / 24 */
@@ -473,6 +475,13 @@ export class GardenSelectorComponent {
           this.confirmingDelete = selected.session;
         }
       }
+    } else if (this.opts.onNewChild && kb.matches(data, "app.session.new")) {
+      const selected = this.flat[this.selectedIndex];
+      if (selected) {
+        this.setStatus(null);
+        this.opts.onNewChild(selected.session);
+        return;
+      }
     } else {
       if (this.searchInput.handleInput(data)) this.refilter();
     }
@@ -515,6 +524,7 @@ export class GardenSelectorComponent {
       return this.theme.fg(color, truncateToWidth(this.statusMessage.message, width, "…"));
     }
     const hints = ['Tab scope · re:<正则> · "精确短语"', "Enter 切换 · Esc 取消"];
+    if (this.opts.onNewChild) hints.push("Ctrl+N 新建子会话");
     if (this.opts.renameSession) hints.push("Ctrl+R 改名");
     if (this.opts.deleteSession) hints.push("Ctrl+D 删除");
     return this.theme.fg("muted", truncateToWidth(hints.join(" · "), width, "…"));

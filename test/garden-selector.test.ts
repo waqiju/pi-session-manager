@@ -24,6 +24,7 @@ const KEY_MAP: Record<string, string> = {
   "\t": "tui.input.tab",
   "\x12": "app.session.rename",
   "\x04": "app.session.delete",
+  "\x0e": "app.session.new",
 };
 const stubKeybindings = {
   matches: (data: string, action: string) => KEY_MAP[data] === action,
@@ -56,6 +57,7 @@ interface Harness {
   cancelled: { n: number };
   renamed: [string, string][];
   deleted: string[];
+  newChildren: string[];
   loadCounts: { current: number; all: number };
 }
 
@@ -70,6 +72,7 @@ function harness(
     cancelled: { n: 0 },
     renamed: [],
     deleted: [],
+    newChildren: [],
     loadCounts: { current: 0, all: 0 },
   };
   h.c = new GardenSelectorComponent({
@@ -93,6 +96,9 @@ function harness(
     deleteSession: async (item) => {
       h.deleted.push(item.path);
       return { ok: true };
+    },
+    onNewChild: (item) => {
+      h.newChildren.push(item.path);
     },
     ...over,
   });
@@ -234,6 +240,24 @@ test("选择器: 删除流程（ctrl+d → enter 确认 → 列表移除）；�
   await flush();
   assert.deepEqual(h.deleted, [a.path]);
   assert.ok(!plain(h.c).includes("要删除的"), "删除后从列表移除");
+});
+
+test("选择器: Ctrl+N 新建子会话（onNewChild 回调）", async () => {
+  const a = makeItem({ mdBase: "aaa", name: "父会话", modified: new Date("2026-09-14T01:00:00Z") });
+  const b = makeItem({ mdBase: "bbb", name: "子会话", modified: new Date("2026-09-14T02:00:00Z") });
+  const h = harness([a, b]);
+  await flush();
+  // b 最新排第一 → Ctrl+N 创建其子会话
+  h.c.handleInput("\x0e");
+  assert.deepEqual(h.newChildren, [b.path]);
+  assert.ok(plain(h.c).includes("Ctrl+N 新建子会话"), "hint 常驻");
+
+  // 不传 onNewChild 时 Ctrl+N 不消费，回退到搜索输入
+  const h2 = harness([a, b], undefined, { onNewChild: undefined });
+  await flush();
+  h2.c.handleInput("\x0e");
+  assert.equal(h2.newChildren.length, 0);
+  // \x0e 是 Shift Out（不可打印）：LineInput 不识别 → 不崩即可
 });
 
 test("选择器: 空目录提示回填命令；加载失败进状态栏", async () => {

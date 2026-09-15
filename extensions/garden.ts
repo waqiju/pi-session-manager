@@ -242,6 +242,10 @@ export default function (pi: ExtensionAPI) {
               loadAll,
               onSelect: (p) => done(p),
               onCancel: () => done(null),
+              onNewChild: (item) => {
+                done(null);
+                void ctx.newSession({ parentSession: item.path });
+              },
               renameSession: async (item, name) => {
                 // 与内建 /resume 同一实现路径；随后立即重转，让 md frontmatter/文件名同步新名
                 const { SessionManager } = (await import("@earendil-works/pi-coding-agent")) as any;
