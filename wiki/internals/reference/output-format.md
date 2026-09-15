@@ -36,6 +36,7 @@ garden 生成的 markdown 的完整格式约定。面向：阅读者、后续处
 | `tokens` | map | `input` / `output` / `cache_read` / `cache_write` / `total`（含 compaction/branch_summary 的 usage） |
 | `cost_total` | number | 成本合计（4 位小数） |
 | `source` | string | 源 jsonl 文件名 |
+| `parent_session` | string | 可选。fork 父 session 的 jsonl 全路径（header.parentSession 原样记录；选择器 fork 树按其 basename 配对） |
 | `generator` | string | 固定 `"garden"` |
 | `version` | string | `GARDEN_VERSION`；增量判断依据 |
 

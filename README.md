@@ -27,8 +27,9 @@ pi install /path/to/pi-session-manager      # 本地路径（开发期，/reload
 pi install https://github.com/waqiju/pi-session-manager   # git package
 ```
 
-扩展内命令：`/garden`（快速 session 选择器，等位 /resume 但只读文件头 + garden 产物富化，
-慢盘友好；全文搜索语料来自 l2 正文，`PI_GARDEN_SELECTOR_FULLTEXT=0` 可关）、
+扩展内命令：`/garden`（快速 session 选择器，等位 /resume：fork 树/搜索/改名/删除；
+自绘组件零 realpathSync + 数据源只读 garden md 产物，drvfs 上秒开——内建组件因
+canonicalizePath 会卡 ~22s；`PI_GARDEN_SELECTOR=builtin` 可回退官方组件）、
 `/gardener-output`（转换当前 session，`all` 全量回填）、`/gardener-open [lN]`（浏览器打开 md）。
 触发点与 `PI_GARDEN*` 环境变量配置见 [extension 参考](wiki/internals/reference/extension.md)。
 

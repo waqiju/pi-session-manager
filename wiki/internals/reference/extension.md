@@ -34,27 +34,51 @@ ephemeral session（无 session 文件）静默跳过；非常规路径布局（
 
 ## /garden 快速选择器
 
-与内建 /resume **同一个 UI 组件**（`SessionSelectorComponent`，pi 公共导出），fork 继承树
-（threaded）、搜索框、Ctrl+D 删除（trash）、重命名、scope/sort 切换全部等位。
-唯一差别是数据源（`src/session-list.ts`）：
+等位内建 /resume（fork 树 / 搜索 / 改名 / 删除 / scope 切换），但**自绘组件 + md 数据源**，
+慢盘（drvfs）上比内建快一个数量级。两个设计点：
 
-- **每个文件只做一次有界读**（首 64KB）：首行 header（id / cwd / timestamp /
-  `parentSession` fork 链）+ 缓冲内顺带取首条 user 消息与 session_info 名；
-  `modified` 用 stat.mtime 近似。内建则逐行读完整个 jsonl，慢盘（drvfs）上数百个
-  session 差距显著（本机 309 个 / 138.7MB：快速列表 2.0s vs 内建式全读 1.5s 温缓存，
-  冷缓存 / 更慢的盘差距放大，字节量差 6.6 倍）。
-- **garden 产物富化**：输出文件名是可读命名（与 jsonl 名无推导关系），按 frontmatter
-  `session_id` 建 l2 索引反查（`buildGardenIndex`，同 session 多份时新命名优先）。
-  l2 frontmatter 回填 name / messageCount；l2 正文（剥 frontmatter，单文件上限
-  `FULLTEXT_READ_BYTES=1MB`）回填 allMessagesText → **全文搜索可用**（语料语义与内建
-  user+assistant text 相当；本机 315 session 语料 4.7MB，all scope ≈2.6s）。
-  `PI_GARDEN_SELECTOR_FULLTEXT=0` 关闭，退回只搜 id/name/cwd。
-- **已知取舍**：未转换（无 l2 产物）且无名的 session 显示为空标题（时间/fork 位置
-  仍可辨认）；l2 正文含工具行等渲染噪音，fuzzy 搜索召回略宽于内建（短语可用
-  `"exact"` / `re:` 语法）。
-- 选中后 `ctx.switchSession(path)`；cwd 缺失的跨机器 session 会报错 notify
-  （**上游限制**：`ctx.switchSession` 未暴露内建的 cwd 重选流 `cwdOverride`，
-  扩展侧无法补齐）。
+### 自绘组件（extensions/garden-selector.ts）
+
+不用 pi 的 `SessionSelectorComponent`：其 `buildSessionTree` 对每个 session 调 3 次
+`canonicalizePath`（= `realpathSync`），而 `~/.pi/agent/sessions` 是 drvfs symlink 时
+单次 ~23ms —— 315 session 首次渲染 ≈22s，且**搜索清空 / 切 scope / 增删后重付**，
+每按键渲染还有 ~230ms 的当前行判定开销（pi 0.85.1 实测）。本组件零 `realpathSync`：
+fork 树按 jsonl 文件名（basename）配对（`src/session-tree.ts`，文件名含 uuid 全局唯一，
+跨路径风格——symlink / Windows 反斜杠遗留——都能配对），当前 session 高亮是字符串比较。
+零运行时 pi 依赖（theme / keybindings 由 `ctx.ui.custom` 工厂注入结构化接口），
+node --test 可直测（test/garden-selector.test.ts）。
+
+### md 数据源（src/session-list.ts）
+
+只读 garden 产物，不再读 jsonl（假设转换常驻、产物最新）：
+
+- 每个 base 取最优级别（l2 > l3 > l1 > l0），一次有界读（正文上限 1MB，仅 frontmatter 时 4KB）；
+  frontmatter 提供 id / cwd / started / ended / name / messages 计数 / `source`（jsonl 文件名）
+  / `parent_session`（fork 链）；正文提供 firstMessage（首个 `## 🙋 User` 小节）与
+  allMessagesText（全文搜索语料，`PI_GARDEN_SELECTOR_FULLTEXT=0` 关闭）。
+- jsonl 路径由 `<sessionsRoot>/<sub>/<source>` 重建；选中时才 `existsSync` 校验
+  （列表期不查，315 次 syscall ≈7s 不值得）；jsonl 已删 → notify（md 归档仍在）。
+- 无 `source` 字段的旧版产物跳过——升级后跑一次 `/gardener-output all` 回填即全量出现。
+- 同 session 多份产物（改名/重编号残留）去重：新命名风格优先，同风格取 mtime 新者。
+
+### 与内建的功能差异
+
+保留：fork 树（threaded）、搜索（fuzzy token / `"phrase"` 精确 / `re:` 正则，语法同内建）、
+Tab scope（current/all 都缓存，二次切换零开销）、Ctrl+R 改名（`SessionManager.appendSessionInfo`
+同路径 + 立即重转 md 同步新名）、Ctrl+D 删除（trash 优先回退 unlink 删 jsonl；按 frontmatter
+session_id 清全部 md 产物；内存移除，**不做内建那样的全量重载**）。
+裁剪：sort 三模式循环、named-only 过滤、path 显示开关（threaded + 搜索已覆盖）。
+回退：`PI_GARDEN_SELECTOR=builtin` 可切回官方组件（对比/排查用，drvfs 上会卡）。
+
+### 实测（本机 drvfs，315 session）
+
+| 指标 | 内建组件 + 内建 loader | garden 自绘组件 |
+|------|----------------------|----------------|
+| 首次可用 | ~22s+（canonicalizePath 风暴） | 0.4-0.5s（current）/ 1.4s（all） |
+| 搜索按键 | 每次渲染 ~230ms（isCurrent canonicalize）；清空搜索重付 22s | <50ms |
+| 切 scope（已加载） | 重付 22s | <5ms（缓存） |
+
+验证：`node scripts/probe-selector.mjs`（headless，真实数据 + 按键驱动 + 性能预算断言）。
 
 ## 配置（环境变量）
 
@@ -63,7 +87,8 @@ ephemeral session（无 session 文件）静默跳过；非常规路径布局（
 | `PI_GARDEN` | `1` | `0` = 完全停用扩展（不注册任何事件/命令） |
 | `PI_GARDEN_LIVE_INTERVAL_S` | `60` | live 触发最小间隔（秒，可小数）；`0` = 关闭 live 触发 |
 | `PI_GARDEN_OPEN_CMD` | 平台默认 | 自定义打开命令；空格切分，含 `{file}` 替换否则追加为末参。平台默认：WSL `wslpath -w` + `cmd.exe /c start`，Linux `xdg-open`，macOS `open` |
-| `PI_GARDEN_SELECTOR_FULLTEXT` | `1` | `/garden` 选择器用 garden l2 正文作全文搜索语料；`0` = 关闭（退回只搜 id/name/cwd） |
+| `PI_GARDEN_SELECTOR_FULLTEXT` | `1` | `/garden` 选择器用 garden md 正文作全文搜索语料；`0` = 关闭（退回只搜 id/name/cwd） |
+| `PI_GARDEN_SELECTOR` | 自绘组件 | `builtin` = 退回 pi 官方 SessionSelectorComponent（对比/排查用；drvfs 上会卡） |
 
 ## 行为细节
 

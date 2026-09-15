@@ -10,8 +10,10 @@
  *   增量判断（mtime + GARDEN_VERSION）在 processFile 内，重复触发几乎零成本。
  *
  * 二、命令：
- *   /garden            → 快速 session 选择器（等位 /resume：fork 树/搜索/删除/重命名，
- *                        但列表只读文件头 + garden frontmatter 富化，慢盘友好）
+ *   /garden            → 快速 session 选择器（等位 /resume：fork 树/搜索/删除/重命名。
+ *                        数据源 = garden md 产物（不再读 jsonl）；自绘组件零 realpathSync，
+ *                        drvfs 上 <3s 就绪（内建组件因 canonicalizePath 卡 ~22s，见
+ *                        extensions/garden-selector.ts 头注）
  *   /gardener-output   → 转换当前 session（all = 全量回填 sessions 树）
  *   /gardener-open [lN]→ 默认浏览器打开当前 session 的 garden md（默认最高存在级别）
  *
@@ -19,8 +21,10 @@
  *   PI_GARDEN=0                     完全停用本扩展
  *   PI_GARDEN_LIVE_INTERVAL_S=60    live 转换最小间隔（秒，可小数）；0 = 关闭 live 触发
  *   PI_GARDEN_OPEN_CMD              自定义打开命令（空格切分；{file} 占位，缺省追加为末参）
- *   PI_GARDEN_SELECTOR_FULLTEXT=1   /garden 选择器用 garden l2/l3 正文回填全文搜索语料；
+ *   PI_GARDEN_SELECTOR_FULLTEXT=1   /garden 选择器用 garden md 正文回填全文搜索语料；
  *                                   0 = 关闭（退回只搜 id/name/cwd）
+ *   PI_GARDEN_SELECTOR=builtin      /garden 退回 pi 官方 SessionSelectorComponent（对比/排查用；
+ *                                   drvfs 上会卡，正常不要设）
  *
  * 注意：factory 只在会话加载时运行；不在此处起 timer / watcher（pi 扩展约束）。
  */
@@ -30,7 +34,8 @@ import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { collectJobs, pathsForFile, prepareGroup, processFile } from "../src/cli.ts";
 import { GARDEN_LEVELS, isGardenLevel, openFile, pickHighestLevelFile, type GardenLevel } from "../src/open.ts";
-import { listAllSessions, listProjectSessions } from "../src/session-list.ts";
+import { gardenDirForSessionDir, gardenRootForSessionDir, listAllSessions, listProjectSessions } from "../src/session-list.ts";
+import { GardenSelectorComponent, deleteGardenOutputs, deleteSessionFile } from "./garden-selector.ts";
 
 export interface GardenConfig {
   enabled: boolean;
@@ -63,14 +68,14 @@ export function gardenPathsFor(sessionFile: string): { sub: string; outRoot: str
   return pathsForFile(sessionFile);
 }
 
-/** 转换单个 session 文件；非常规布局或文件不存在返回 null */
-export function convertSessionFile(sessionFile: string): { written: string[]; skipped: string[] } | null {
+/** 转换单个 session 文件；非常规布局或文件不存在返回 null。base = 输出文件名主体（重命名后选择器同步用） */
+export function convertSessionFile(sessionFile: string): { written: string[]; skipped: string[]; base: string } | null {
   const p = gardenPathsFor(sessionFile);
   if (!p || !existsSync(sessionFile)) return null;
   const outDir = path.join(p.outRoot, p.sub);
   const prepared = prepareGroup([{ src: sessionFile, sub: p.sub }], () => {});
   if (prepared.length === 0) return null;
-  return processFile(prepared[0], outDir);
+  return { ...processFile(prepared[0], outDir), base: prepared[0].base };
 }
 
 export default function (pi: ExtensionAPI) {
@@ -191,39 +196,72 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("garden", {
-    description: "快速 session 选择器（等位 /resume；列表只读文件头，慢盘友好）",
+    description: "快速 session 选择器（等位 /resume；数据源 = garden md 产物，慢盘友好）",
     handler: async (_args, ctx) => {
       if (!ctx.hasUI) {
         notify(ctx, "garden: 选择器需要 TUI/RPC 模式", "warning");
         return;
       }
-      // 动态 import：仅在选择器真正打开时才加载 pi 包（保持本文件可被零依赖测试）
-      const { SessionSelectorComponent, SessionManager } = (await import("@earendil-works/pi-coding-agent")) as any;
       const sessionDir = ctx.sessionManager.getSessionDir();
-      const sessionsRoot = path.dirname(sessionDir);
+      const gardenDir = gardenDirForSessionDir(sessionDir);
+      const gardenRoot = gardenRootForSessionDir(sessionDir);
       const currentFile = ctx.sessionManager.getSessionFile();
-      const picked = await ctx.ui.custom<string | null>(
-        (tui, _theme, keybindings, done) =>
-          new SessionSelectorComponent(
-            (onProgress: (loaded: number, total: number) => void) => listProjectSessions(sessionDir, { onProgress, fullText: cfg.selectorFullText }),
-            (onProgress: (loaded: number, total: number) => void) => listAllSessions(sessionsRoot, { onProgress, fullText: cfg.selectorFullText }),
-            (p: string) => done(p),
-            () => done(null),
-            () => done(null),
-            () => tui.requestRender(),
-            {
+      const loadCurrent = (onProgress: (loaded: number, total: number) => void) =>
+        listProjectSessions(gardenDir, { onProgress, fullText: cfg.selectorFullText });
+      const loadAll = (onProgress: (loaded: number, total: number) => void) =>
+        listAllSessions(gardenRoot, { onProgress, fullText: cfg.selectorFullText });
+
+      let picked: string | null;
+      if ((process.env.PI_GARDEN_SELECTOR ?? "").trim() === "builtin") {
+        // 回退：pi 官方组件（内部 canonicalizePath 在 drvfs 上会卡 ~22s，仅用于对比/排查）。
+        // 动态 import：仅在此分支才加载 pi 包（保持本文件可被零依赖测试）
+        const { SessionSelectorComponent } = (await import("@earendil-works/pi-coding-agent")) as any;
+        picked = await ctx.ui.custom<string | null>(
+          (tui, _theme, keybindings, done) =>
+            new SessionSelectorComponent(
+              loadCurrent,
+              loadAll,
+              (p: string) => done(p),
+              () => done(null),
+              () => done(null),
+              () => tui.requestRender(),
+              { keybindings },
+              currentFile ?? undefined,
+            ),
+        );
+      } else {
+        picked = await ctx.ui.custom<string | null>(
+          (tui, theme, keybindings, done) =>
+            new GardenSelectorComponent({
+              theme,
               keybindings,
-              showRenameHint: true,
-              renameSession: async (p: string, name: string | null) => {
-                const next = (name ?? "").trim();
-                if (!next) return;
-                SessionManager.open(p).appendSessionInfo(next); // 与内建 /resume 同一实现路径
+              requestRender: () => tui.requestRender(),
+              getTerminalHeight: () => (tui as any).getTerminalHeight?.() ?? process.stdout.rows ?? 24,
+              currentFilePath: currentFile ?? undefined,
+              loadCurrent,
+              loadAll,
+              onSelect: (p) => done(p),
+              onCancel: () => done(null),
+              renameSession: async (item, name) => {
+                // 与内建 /resume 同一实现路径；随后立即重转，让 md frontmatter/文件名同步新名
+                const { SessionManager } = (await import("@earendil-works/pi-coding-agent")) as any;
+                SessionManager.open(item.path).appendSessionInfo(name);
+                return convertSessionFile(item.path)?.base;
               },
-            },
-            currentFile ?? undefined,
-          ),
-      );
+              deleteSession: async (item) => {
+                const r = await deleteSessionFile(item.path);
+                if (r.ok) await deleteGardenOutputs(item); // md 是选择器数据源，必须同步清理
+                return r;
+              },
+            }),
+        );
+      }
       if (!picked) return;
+      if (!existsSync(picked)) {
+        // 列表期不做存在性校验（315 次 syscall ≈ 7s），选中这一次才查
+        notify(ctx, `garden: 源 jsonl 已不存在（md 归档仍在）: ${path.basename(picked)}`, "warning");
+        return;
+      }
       try {
         await ctx.switchSession(picked);
       } catch (e) {

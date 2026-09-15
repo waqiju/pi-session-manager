@@ -1,7 +1,7 @@
 import type { Entry, SessionHeader, Usage } from "../types.ts";
 
 /** 生成器版本：行为变更时 bump，增量判断会检测到不一致并全量重生成 */
-export const GARDEN_VERSION = "0.7.2";
+export const GARDEN_VERSION = "0.7.3";
 
 export interface RenderOptions {
   /** 源文件名（xxx.jsonl），写入 frontmatter */
@@ -128,6 +128,8 @@ export function frontmatter(
   lines.push(`level: ${q(level)}`);
   lines.push(`session_id: ${q(header?.id ?? "unknown")}`);
   if (header?.cwd) lines.push(`cwd: ${q(header.cwd)}`);
+  // fork 继承链：/garden 选择器的 fork 树全靠它（md 是唯一数据源，jsonl 不再参与列表）
+  if (header?.parentSession) lines.push(`parent_session: ${q(header.parentSession)}`);
   if (header?.timestamp) lines.push(`started: ${q(header.timestamp)}`);
   if (stats.ended) lines.push(`ended: ${q(stats.ended)}`);
   if (stats.name) lines.push(`name: ${q(stats.name)}`);
