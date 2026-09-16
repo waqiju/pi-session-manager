@@ -24,6 +24,7 @@ pi 扩展形态：会话生命周期内自动把**当前 session** 转成四级 
 | `agent_settled` | live 转换（防抖，见 `PI_GARDEN_LIVE_INTERVAL_S`） |
 | `session_compact` | compaction 章节边界 |
 | `session_shutdown` | 终态保证；quit / new / resume / fork / reload 均触发 |
+| `session_info_changed` | 会话 metadata 变更（如 `/name` 改名）；改名会更新文件名 slug，旧文件由增量清理删除 |
 
 所有触发共享 `processFile` 的增量判断（mtime + `GARDEN_VERSION`），重复触发近零成本。
 ephemeral session（无 session 文件）静默跳过；非常规路径布局（不在 `.../sessions/<sub>/` 下）静默跳过。

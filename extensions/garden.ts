@@ -8,6 +8,7 @@
  *     agent_settled    → live 转换（防抖，默认 60s，PI_GARDEN_LIVE_INTERVAL_S 调整，0 关闭）
  *     session_compact  → compaction 章节边界
  *     session_shutdown → 终态保证（quit / new / resume / fork / reload 都会触发）
+ *     session_info_changed → metadata 变更（/name 改名），更新文件名 slug
  *   增量判断（mtime + GARDEN_VERSION）在 processFile 内，重复触发几乎零成本。
  *
  * 二、命令：
@@ -124,6 +125,10 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    convertCurrent(ctx);
+  });
+
+  pi.on("session_info_changed", async (_event, ctx) => {
     convertCurrent(ctx);
   });
 

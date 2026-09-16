@@ -106,7 +106,7 @@ test("convertSessionFile: 默认导出 l1/l3；levels 参数可指定", () => {
   }
 });
 
-test("扩展: session_shutdown / session_compact / session_start 触发转换", async () => {
+test("扩展: session_shutdown / session_compact / session_start / session_info_changed 触发转换", async () => {
   const { root, sessionFile } = setup();
   try {
     await withEnv({ PI_GARDEN: undefined, PI_GARDEN_LIVE_INTERVAL_S: "0" }, async () => {
@@ -126,6 +126,10 @@ test("扩展: session_shutdown / session_compact / session_start 触发转换", 
         unlinkSync(l1);
         await handlers.get("session_start")!({}, ctx);
         assert.ok(existsSync(l1), "start 应触发转换");
+
+        unlinkSync(l1);
+        await handlers.get("session_info_changed")!({}, ctx);
+        assert.ok(existsSync(l1), "info_changed 应触发转换");
 
         // ephemeral session：无文件，静默不抛错
         await handlers.get("session_shutdown")!({}, mockCtx(undefined, logs));
