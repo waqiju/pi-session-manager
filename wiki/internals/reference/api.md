@@ -69,16 +69,17 @@
 | 导出 | 说明 |
 |------|------|
 | `generateDirIndex(dir) => Promise<DirIndexResult \| null>` | 重建一个项目目录的 index.md：frontmatter-only 扫描（不读正文）→ fork 森林；无会话 → null；内容无变化跳过写盘（`changed=false`）；链接 = 存在的最高级别 md 的相对路径 |
-| `buildIndexPage(items, resolveFile) => string` | 索引页文本（纯函数）：标题 + 统计 + 说明块 + 嵌套列表（缩进 = fork 层级，树间空行）；label 转义 `[`/`]`，href 包 `<>`（文件名可能含括号/空格） |
+| `buildIndexPage(items, resolveFile) => string` | 索引页文本（纯函数）：标题 + 统计 chip + HTML 注释说明块 + 嵌套列表（💬 根 / 🌿 fork，树间空行）；元数据反引号隔离、当年日期省略年份、label 转义 `[`/`]`、href 包 `<>`（文件名可能含括号/空格） |
 | `INDEX_FILE_NAME` | `"index.md"`；不匹配 `*.lN.md`，列表加载与孤儿清理天然忽略它 |
 
 ## format.ts（会话列表展示格式化，index.md 与子树复制共用）
 
 | 导出 | 说明 |
 |------|------|
-| `nodeLabel(item) => string` | name 优先；无名回退首条消息摘要（~50 列截断、加引号）；皆无 → `untitled` |
+| `nodeLabel(item) => string` | name 优先（超 48 列截断）；无名回退首条消息摘要（36 列截断、加引号）；皆无 → `untitled` |
 | `formatSizeLabel(bytes \| null) => string` | `500B` / `8KB` / `1.2MB`；null → `?` |
 | `formatDate(d) => string` | `YYYY-MM-DD`（本地时区；导出文本不用相对时间，落盘后失真） |
+| `formatDateShort(d, now?) => string` | 同年 → `MM-DD`，跨年 → `YYYY-MM-DD`（索引页用；当年省年份） |
 | `cleanInline(t) => string` | 控制字符/换行 → 空格，折叠空白 |
 
 ## session-list.ts（快速 session 列表，供 `/garden` 选择器；数据源 = garden md，不读 jsonl）

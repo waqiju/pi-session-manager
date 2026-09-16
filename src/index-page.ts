@@ -2,8 +2,10 @@
  * garden 目录索引页（index.md）生成。
  *
  * 每个 garden 项目目录一份 index.md：fork 森林（多棵会话树，按最近活跃降序）+
- * markdown 嵌套列表（缩进 = fork 层级），每行内联 名称/消息数/大小/日期，链接为
- * 相对路径（编辑器可点击；garden 目录跨机器同步/git 提交时绝对路径会失效）。
+ * markdown 嵌套列表（缩进 = fork 层级，渲染即树形），行首 💬 树根 / 🌿 fork 子会话，
+ * 元数据（msgs/大小/日期）包反引号灰底块与人读文字隔离；日期为当年时省略年份；
+ * 链接为相对路径（编辑器可点击；garden 目录跨机器同步/git 提交时绝对路径会失效）。
+ * 给 AI 看的说明放在 HTML 注释里（渲染不可见，不占视觉空间）。
  *
  * 生成时机（索引与产物的一致性边界）：
  *   CLI 转换 / --sync 收尾     → 有写入/清理/缺 index 的目录重建
@@ -17,7 +19,7 @@
 
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { formatDate, formatSizeLabel, nodeLabel } from "./format.ts";
+import { formatDateShort, formatSizeLabel, nodeLabel } from "./format.ts";
 import { pickHighestLevelFile } from "./open.ts";
 import { listProjectSessions, type SessionListItem } from "./session-list.ts";
 import { basenameAny, buildSessionTree, flattenSessionTree } from "./session-tree.ts";
@@ -52,32 +54,37 @@ function projectCwd(items: SessionListItem[]): string {
 
 /**
  * 目录索引页文本（纯函数）。items = 该 garden 目录的全部会话（listProjectSessions）。
- * 布局：标题 + 统计行 + 说明块 + fork 森林（嵌套列表；树与树之间空行分隔）。
+ * 布局：标题 + 统计行（反引号 chip）+ HTML 注释说明块 + fork 森林
+ * （💬 根 / 🌿 fork，嵌套列表，树间空行；元数据反引号隔离，日期当年省略年份）。
  */
 export function buildIndexPage(items: SessionListItem[], resolveFile: (item: SessionListItem) => IndexFileInfo): string {
   const roots = buildSessionTree(items);
   const flat = flattenSessionTree(roots);
+  const infos = flat.map((n) => resolveFile(n.session));
   const cwd = projectCwd(items);
-  const title = cwd ? `# 会话索引 — ${basenameAny(cwd.replace(/[/\\]+$/, ""))}` : "# 会话索引";
+  const known = infos.filter((i) => i.size !== null);
+  const total = known.length ? ` · ${formatSizeLabel(known.reduce((a, i) => a + (i.size ?? 0), 0))} 总计` : "";
+  const title = cwd ? `# 🌳 会话索引 — ${basenameAny(cwd.replace(/[/\\]+$/, ""))}` : "# 🌳 会话索引";
   const lines: string[] = [
     title,
     "",
-    `共 ${flat.length} 条对话 · ${roots.length} 棵会话树${cwd ? ` · 项目 \`${cwd}\`` : ""}`,
+    `> \`${flat.length} 条对话 · ${roots.length} 棵会话树${total}\`${cwd ? ` · 项目 \`${cwd}\`` : ""}`,
     "",
-    "> 本目录是该项目全部 AI 会话的 markdown 归档（文件名 `<日期>-<序号>-<slug>.lN.md`）。",
-    "> 子会话由父会话 fork（继承其上下文起点），缩进表示 fork 层级；各树按最近活跃降序。",
-    "> 链接为相对路径，指向该对话的最高级别导出（l3 纯问答）；同名 .l1.md（如存在）含更多",
-    "> 工具调用与推理细节。",
+    "<!--",
+    "索引说明：子会话由父会话 fork（继承其上下文起点），缩进表示 fork 层级；各树按最近活跃降序。",
+    "文件名 <日期>-<序号>-<slug>.lN.md；链接为相对路径，指向该对话的最高级别导出（l3 纯问答），",
+    "同名 .l1.md（如存在）含更多工具调用与推理细节。日期为 MM-DD 时即当年。💬 树根 / 🌿 fork 子会话。",
+    "-->",
     "",
   ];
-  for (const n of flat) {
-    const info = resolveFile(n.session);
-    const meta = `${n.session.messageCount} msgs · ${formatSizeLabel(info.size)} · ${formatDate(n.session.modified)}`;
+  flat.forEach((n, i) => {
+    const meta = `${n.session.messageCount} msgs · ${formatSizeLabel(infos[i].size)} · ${formatDateShort(n.session.modified)}`;
+    const icon = n.depth === 0 ? "💬" : "🌿";
     // href 加 <>：文件名可能含空格/括号（裸 ( ) 会截断 markdown 链接目标）
-    const row = `- [${escapeLinkLabel(nodeLabel(n.session))}](<${info.href}>) — ${meta}`;
+    const row = `- ${icon} [${escapeLinkLabel(nodeLabel(n.session))}](<${infos[i].href}>) \`${meta}\``;
     if (n.depth === 0 && lines[lines.length - 1] !== "") lines.push(""); // 树间空行（渲染上拉开间距）
     lines.push(`${"  ".repeat(n.depth)}${row}`);
-  }
+  });
   return lines.join("\n") + "\n";
 }
 

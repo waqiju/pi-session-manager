@@ -45,8 +45,8 @@ garden -h                  # 帮助
 - **增量**：输出 mtime ≥ 源 mtime 且 frontmatter `version` == 当前 `GARDEN_VERSION`
   才跳过；两个条件任一不满足即重新生成
 - 单个文件失败不影响其余（打印 `✗` 并继续）
-- **目录索引（index.md）**：每个 garden 项目目录一份 fork 森林索引（生成逻辑见
-  src/index-page.ts）。重建时机：目录模式/`--sync` 收尾（有写入/清理或缺索引的目录；
+- **目录索引（index.md）**：每个 garden 项目目录一份 fork 森林索引（生成逻辑与版式
+  见 src/index-page.ts 头注；💬/🌿 标层级、元数据反引号隔离、当年日期省略年份、说明藏 HTML 注释）。重建时机：目录模式/`--sync` 收尾（有写入/清理或缺索引的目录；
   `--sync` 为全量对账，覆盖所有现有项目目录）、`--index` 显式重建。内容无变化时跳过写盘
   （避免 mtime 抖动）。`--dry-run` 不动索引
 - **同步模式（`--sync`）**：在增量转换前，先递归扫描 garden 全目录（含子目录），
