@@ -75,10 +75,10 @@ test("buildIndexPage: 头部统计 + fork 森林嵌套列表 + emoji + 元数据
   const iRoot = lines.findIndex((l) => l.includes("[根会话]"));
   const iChild = lines.findIndex((l) => l.includes("[子会话]"));
   assert.ok(iOther > 0 && iRoot > iOther && iChild > iRoot, `顺序: other=${iOther} root=${iRoot} child=${iChild}`);
-  // 💬 根 / 🌿 fork；元数据反引号 chip；当年日期 MM-DD
-  assert.equal(lines[iOther], "- 💬 [另一棵](<./2026-09-16-001-另.l3.md>) `10 msgs · 1KB · 09-16`");
-  assert.match(lines[iRoot], /^- 💬 \[根会话\]\(<\.\//);
-  assert.match(lines[iChild], /^ {2}- 🌿 \[子会话\]\(<\.\/2026-09-15-001-子\.l3\.md>\) `50 msgs · 1KB · 09-15`$/);
+  // 🗂️ 有子会话 / 📄 单条（无子的根也是 📄）；元数据 chip 不含文件大小；当年日期 MM-DD
+  assert.equal(lines[iOther], "- 📄 [另一棵](<./2026-09-16-001-另.l3.md>) `10 msgs · 09-16`");
+  assert.match(lines[iRoot], /^- 🗂️ \[根会话\]\(<\.\//);
+  assert.equal(lines[iChild], "  - 📄 [子会话](<./2026-09-15-001-子.l3.md>) `50 msgs · 09-15`");
   // 两棵树之间有空行
   assert.equal(lines[iRoot - 1], "");
 });
@@ -91,11 +91,11 @@ test("buildIndexPage: 无名会话回退首条消息摘要（加引号）；无�
   assert.ok(text.includes("[untitled]"), "无消息兜底 untitled");
 });
 
-test("buildIndexPage: 链接 label 转义方括号；size null → ?", () => {
+test("buildIndexPage: 链接 label 转义方括号；size 全未知 → 头部无总计", () => {
   const item = makeItem({ mdBase: "2026-09-14-001-a", name: "fix [WIP] 分支" });
   const text = buildIndexPage([item], () => ({ href: "./x.l1.md", size: null }));
   assert.ok(text.includes("[fix \\[WIP\\] 分支](<./x.l1.md>)"), text);
-  assert.ok(text.includes("· ? ·"), "size null 显示 ?");
+  assert.ok(!text.includes("总计"), "无已知大小时省略总计");
 });
 
 test("buildIndexPage: 无 cwd → 标题与统计行无项目后缀", () => {
@@ -138,8 +138,8 @@ test("generateDirIndex: 从 md 产物生成 index.md；重复生成 changed=fals
   const content = fs.readFileSync(r.file, "utf-8");
   assert.ok(content.includes("# 🌳 会话索引 — proj"), "标题含项目名");
   assert.ok(content.includes("`2 条对话 · 1 棵会话树"), "统计 chip");
-  assert.ok(content.includes("- 💬 [根会话](<./2026-09-14-001-根.l3.md>)"), "根行相对链接");
-  assert.ok(content.includes("\n  - 🌿 [子会话](<./2026-09-15-001-子.l3.md>)"), "子行缩进");
+  assert.ok(content.includes("- 🗂️ [根会话](<./2026-09-14-001-根.l3.md>)"), "有子会话的根 → 🗂️");
+  assert.ok(content.includes("\n  - 📄 [子会话](<./2026-09-15-001-子.l3.md>)"), "叶子 fork → 📄 且缩进");
   assert.ok(content.includes("4 msgs"), "messages 各 role 求和");
 
   // 重复生成：内容不变 → changed=false，mtime 不动

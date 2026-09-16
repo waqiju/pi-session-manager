@@ -37,7 +37,7 @@ canonicalizePath 会卡 ~22s；`PI_GARDEN_SELECTOR=builtin` 可回退官方组�
 ## 目录索引（index.md）
 
 每个 garden 项目目录维护一份 `index.md`：fork 森林（多棵会话树，按最近活跃降序）
-+ 嵌套列表（缩进 = fork 层级，💬 树根 / 🌿 fork），元数据（msgs/大小/日期）包反引号
++ 嵌套列表（缩进 = fork 层级，🗂️ 有子会话 / 📄 单条），元数据（msgs/日期）包反引号
 灰底块，当年日期省略年份，过长名称/摘要按列宽截断；相对路径链接可直接点击，
 给 AI 看的说明藏在 HTML 注释里（渲染不占视觉空间）。
 重建时机：CLI 转换/`--sync` 收尾（有变化或缺索引的目录）、`garden --index`、

@@ -69,7 +69,7 @@
 | 导出 | 说明 |
 |------|------|
 | `generateDirIndex(dir) => Promise<DirIndexResult \| null>` | 重建一个项目目录的 index.md：frontmatter-only 扫描（不读正文）→ fork 森林；无会话 → null；内容无变化跳过写盘（`changed=false`）；链接 = 存在的最高级别 md 的相对路径 |
-| `buildIndexPage(items, resolveFile) => string` | 索引页文本（纯函数）：标题 + 统计 chip + HTML 注释说明块 + 嵌套列表（💬 根 / 🌿 fork，树间空行）；元数据反引号隔离、当年日期省略年份、label 转义 `[`/`]`、href 包 `<>`（文件名可能含括号/空格） |
+| `buildIndexPage(items, resolveFile) => string` | 索引页文本（纯函数）：标题 + 统计 chip + HTML 注释说明块 + 嵌套列表（🗂️ 有子会话 / 📄 单条，树间空行）；元数据反引号隔离（msgs/日期）、当年日期省略年份、label 转义 `[`/`]`、href 包 `<>`（文件名可能含括号/空格） |
 | `INDEX_FILE_NAME` | `"index.md"`；不匹配 `*.lN.md`，列表加载与孤儿清理天然忽略它 |
 
 ## format.ts（会话列表展示格式化，index.md 与子树复制共用）
