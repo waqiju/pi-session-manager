@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import garden, { convertSessionFile, gardenPathsFor, readConfig } from "../extensions/garden.ts";
+import { collectJobs, convertGroup, prepareGroup, processFile } from "../src/cli.ts";
+import { localDate } from "../src/naming.ts";
 import { buildSampleJsonl } from "./sample.ts";
 
 type Handler = (event: any, ctx: any) => Promise<unknown>;
@@ -87,6 +89,72 @@ test("gardenPathsFor: 只接受 pi 标准 sessions 布局", () => {
 });
 
 const SAMPLE_BASE = "2026-09-14-001-garden_开发会话";
+
+/** 最小 session fixture：header + 可选 session_info + 一条 user 消息 */
+function sess(id: string, timestamp: string, name?: string): string {
+  const lines: Record<string, unknown>[] = [{ type: "session", version: 3, id, timestamp, cwd: "/tmp/proj" }];
+  if (name !== undefined) lines.push({ type: "session_info", id: `${id}-n`, parentId: null, timestamp, name });
+  lines.push({ type: "message", id: `${id}-m`, parentId: null, timestamp, message: { role: "user", content: `hi from ${id}`, timestamp: 1 } });
+  return lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
+}
+
+/** 读输出文件的 frontmatter session_id */
+function ownerOf(filePath: string): string | null {
+  try {
+    return readFileSync(filePath, "utf8").match(/^session_id: "([^"]*)"$/m)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+test("convertSessionFile: live 转换编号撞车避让（Ctrl+N 顶掉兄弟 session 的回归）", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "garden-ext-test-"));
+  const sub = path.join(root, "sessions", "--tmp-proj--");
+  mkdirSync(sub, { recursive: true });
+  const gardenDir = path.join(root, "garden", "--tmp-proj--");
+  // 正午 UTC：任意真实时区都落在同一本地日期；全未命名（slug 同为 untitled，最坏撞车情形）
+  const a = path.join(sub, "2026-09-15T12-10-00_a.jsonl");
+  const b = path.join(sub, "2026-09-15T12-20-00_b.jsonl");
+  const d = localDate("2026-09-15T12:10:00.000Z");
+  const l1 = (n: number) => path.join(gardenDir, `${d}-${String(n).padStart(3, "0")}-untitled.l1.md`);
+  try {
+    writeFileSync(a, sess("aaa", "2026-09-15T12:10:00.000Z"));
+    writeFileSync(b, sess("bbb", "2026-09-15T12:20:00.000Z"));
+    // 全量组转换：a=001, b=002
+    convertGroup(collectJobs(path.join(root, "sessions")).jobs, gardenDir, ["l1"], () => {});
+    assert.equal(ownerOf(l1(1)), "aaa");
+    assert.equal(ownerOf(l1(2)), "bbb");
+
+    // live 转换 b（单 session 组算出 001）→ 避让到 002（自己）→ 幂等跳过，不碰 a 的文件
+    const r1 = convertSessionFile(b, ["l1"]);
+    assert.equal(r1?.base, `${d}-002-untitled`);
+    assert.equal(ownerOf(l1(1)), "aaa", "a 的文件不得被动");
+
+    // Ctrl+N 场景：新 session c（当日更晚）live 转换 → 避让到 003，a/b 文件不动
+    const c = path.join(sub, "2026-09-15T12-30-00_c.jsonl");
+    writeFileSync(c, sess("ccc", "2026-09-15T12:30:00.000Z"));
+    const r2 = convertSessionFile(c, ["l1"]);
+    assert.equal(r2?.base, `${d}-003-untitled`);
+    assert.equal(ownerOf(l1(1)), "aaa", "回归：node11 不得被 node-new 顶掉");
+    assert.equal(ownerOf(l1(2)), "bbb");
+    assert.equal(ownerOf(l1(3)), "ccc");
+
+    // 模拟旧版 bug 的撞车现场：c 的内容被写进 a 的 001 文件（a 的 md 被毁）
+    const cPrep = prepareGroup([{ src: c, sub: "--tmp-proj--" }], () => {})[0];
+    processFile({ ...cPrep, base: `${d}-001-untitled` }, gardenDir, ["l1"]);
+    assert.equal(ownerOf(l1(1)), "ccc", "撞车构造成功");
+
+    // 单遍全量组转换自愈：isUpToDate 的 session 校验识破“已最新”→ a 重写 001；
+    // removeStaleOutputs 复核归属 → 不误删 a 刚重写的 001；c 归位 003
+    const { results } = convertGroup(collectJobs(path.join(root, "sessions")).jobs, gardenDir, ["l1"], () => {});
+    assert.equal(ownerOf(l1(1)), "aaa", "单遍全量后 a 恢复 001");
+    assert.equal(ownerOf(l1(2)), "bbb");
+    assert.equal(ownerOf(l1(3)), "ccc");
+    assert.ok(results.every((r) => !r.error), "无失败项");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("convertSessionFile: 默认导出 l1/l3；levels 参数可指定", () => {
   const { root, sessionFile } = setup();
@@ -200,6 +268,34 @@ test("扩展: /gardener-output 与 /gardener-output all 命令", async () => {
 
       await cmd.handler("all", ctx);
       assert.ok(logs.at(-1)?.includes("garden all: 1 个 session"), logs.join());
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("扩展: /gardener-output all 按子目录分组编号（多项目同日不互占序号）", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "garden-ext-test-"));
+  const sessionsDir = path.join(root, "sessions");
+  // 两个项目目录，各一个同日 session → 各自应拿自己目录的 001（编号是目录内属性）
+  mkdirSync(path.join(sessionsDir, "--proj-a--"), { recursive: true });
+  mkdirSync(path.join(sessionsDir, "--proj-b--"), { recursive: true });
+  const cur = path.join(sessionsDir, "--proj-a--", "2026-09-15T12-00-00_a.jsonl");
+  writeFileSync(cur, sess("aaa", "2026-09-15T12:00:00.000Z", "甲项目"));
+  writeFileSync(path.join(sessionsDir, "--proj-b--", "2026-09-15T12-10-00_b.jsonl"), sess("bbb", "2026-09-15T12:10:00.000Z", "乙项目"));
+  const d = localDate("2026-09-15T12:00:00.000Z");
+  try {
+    await withEnv({}, async () => {
+      const { pi, commands } = mockPi();
+      garden(pi as any);
+      const logs: string[] = [];
+      const ctx = mockCtx(cur, logs);
+      await commands.get("gardener-output")!.handler("all", ctx);
+      assert.ok(logs.at(-1)?.includes("garden all: 2 个 session"), logs.join());
+      const ga = path.join(root, "garden", "--proj-a--");
+      const gb = path.join(root, "garden", "--proj-b--");
+      assert.ok(existsSync(path.join(ga, `${d}-001-甲项目.l1.md`)), "proj-a 自己的 001");
+      assert.ok(existsSync(path.join(gb, `${d}-001-乙项目.l1.md`)), "proj-b 自己的 001（不被 proj-a 占号）");
     });
   } finally {
     rmSync(root, { recursive: true, force: true });

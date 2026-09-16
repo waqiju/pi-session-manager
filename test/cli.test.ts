@@ -6,6 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { buildSampleJsonl } from "./sample.ts";
 import { localDate, slugifyName } from "../src/naming.ts";
+import { avoidForeignBase, isUpToDate, removeStaleOutputs } from "../src/cli.ts";
 import { GARDEN_VERSION } from "../src/render/shared.ts";
 
 const CLI = new URL("../src/cli.ts", import.meta.url).pathname;
@@ -214,6 +215,101 @@ test("CLI: 旧式命名（uuid 文件名）按 frontmatter session_id 清理；�
     assert.ok(out.includes("0 更新"), out);
     assert.ok(!existsSync(stale), "同 uuid 的旧命名文件应被清理");
     assert.ok(existsSync(orphan), "无源孤儿应保留");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** 快速搭带 frontmatter 的输出文件 */
+function mdWith(sessionId: string, version = GARDEN_VERSION): string {
+  return `---\nlevel: "l1"\nsession_id: ${JSON.stringify(sessionId)}\nversion: ${JSON.stringify(version)}\n---\n正文\n`;
+}
+
+test("isUpToDate: session_id 归属校验（撞车文件不算最新）", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "garden-test-"));
+  try {
+    const f = path.join(root, "x.l1.md");
+    writeFileSync(f, mdWith("aaa"));
+    const past = Date.now() - 10_000;
+    assert.equal(isUpToDate(f, past, "aaa"), true, "本 session 且新鲜");
+    assert.equal(isUpToDate(f, past, "bbb"), false, "别人的文件必须重写（否则撞车永不恢复）");
+    assert.equal(isUpToDate(f, past), true, "不传 sessionId 退化为旧行为");
+    assert.equal(isUpToDate(f, Date.now() + 10_000, "aaa"), false, "mtime 过期仍判旧");
+    assert.equal(isUpToDate(path.join(root, "不存在.l1.md"), past, "aaa"), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("removeStaleOutputs: 删除前复核当前归属（重编号交接保护）", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "garden-test-"));
+  const f = "2026-09-14-001-untitled.l1.md";
+  try {
+    // index 快照说文件属于 aaa，但循环内已被 bbb 重写 → 不得删除
+    writeFileSync(path.join(root, f), mdWith("bbb"));
+    const index = new Map([[JSON.stringify("aaa"), [f]]]);
+    assert.equal(removeStaleOutputs(index, root, "aaa", "2026-09-14-002-untitled"), 0);
+    assert.ok(existsSync(path.join(root, f)), "已改属 bbb 的文件不得误删");
+    // 归属仍是 aaa → 正常删除
+    writeFileSync(path.join(root, f), mdWith("aaa"));
+    const index2 = new Map([[JSON.stringify("aaa"), [f]]]);
+    assert.equal(removeStaleOutputs(index2, root, "aaa", "2026-09-14-002-untitled"), 1);
+    assert.ok(!existsSync(path.join(root, f)));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("avoidForeignBase: 撞别人递增、撞自己/空位复用", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "garden-test-"));
+  const base = (n: number) => `2026-09-15-${String(n).padStart(3, "0")}-untitled`;
+  try {
+    assert.equal(avoidForeignBase(root, base(1), "me"), base(1), "无冲突原样");
+    writeFileSync(path.join(root, `${base(1)}.l1.md`), mdWith("other"));
+    assert.equal(avoidForeignBase(root, base(1), "me"), base(2), "001 被占 → 002");
+    writeFileSync(path.join(root, `${base(2)}.l3.md`), mdWith("other2")); // 任意级别都算占用
+    assert.equal(avoidForeignBase(root, base(1), "me"), base(3), "002 也被占 → 003");
+    writeFileSync(path.join(root, `${base(3)}.l1.md`), mdWith("me"));
+    assert.equal(avoidForeignBase(root, base(1), "me"), base(3), "自己的文件不算占用");
+    // 读不出 session_id 的文件保守避让
+    writeFileSync(path.join(root, `${base(4)}.l1.md`), "没有 frontmatter");
+    writeFileSync(path.join(root, `${base(3)}.l9.md`), mdWith("other")); // 003 的 l9 是别人的
+    assert.equal(avoidForeignBase(root, base(3), "me"), base(5), "003 被 l9 占、004 读不出 id → 005");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI: 同 slug 重编号交接不误删（插入更早未命名 session）", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "garden-test-"));
+  const sessionsDir = path.join(root, "sessions");
+  const subDir = path.join(sessionsDir, "--tmp-proj--");
+  mkdirSync(subDir, { recursive: true });
+  const gardenDir = path.join(root, "garden", "--tmp-proj--");
+  // 正午 UTC：任意真实时区都落在同一本地日期
+  const d = localDate("2026-09-14T12:10:00.000Z");
+  const head = (base: string) => {
+    try {
+      return readFileSync(path.join(gardenDir, `${base}.l1.md`), "utf8").slice(0, 200);
+    } catch {
+      return "";
+    }
+  };
+  try {
+    // 两个未命名 session：a=001-untitled, b=002-untitled
+    writeFileSync(path.join(subDir, "2026-09-14T12-10-00_a.jsonl"), sessionJsonl("uuid-a", "2026-09-14T12:10:00.000Z"));
+    writeFileSync(path.join(subDir, "2026-09-14T12-20-00_b.jsonl"), sessionJsonl("uuid-b", "2026-09-14T12:20:00.000Z"));
+    execFileSync(process.execPath, [CLI, sessionsDir], { encoding: "utf8" });
+    assert.ok(head(`${d}-001-untitled`).includes('session_id: "uuid-a"'));
+    assert.ok(head(`${d}-002-untitled`).includes('session_id: "uuid-b"'));
+
+    // 插入更早的未命名 session → 001/002 文件名整体换手：z←001, a←002, b←003
+    // 回归：removeStaleOutputs 必须复核当前归属，不得把 z 刚写入的 001 当 a 的旧文件删掉
+    writeFileSync(path.join(subDir, "2026-09-14T12-00-00_z.jsonl"), sessionJsonl("uuid-z", "2026-09-14T12:00:00.000Z"));
+    execFileSync(process.execPath, [CLI, sessionsDir], { encoding: "utf8" });
+    assert.ok(head(`${d}-001-untitled`).includes('session_id: "uuid-z"'), `001 应归 z:\n${head(`${d}-001-untitled`)}`);
+    assert.ok(head(`${d}-002-untitled`).includes('session_id: "uuid-a"'), `002 应归 a:\n${head(`${d}-002-untitled`)}`);
+    assert.ok(head(`${d}-003-untitled`).includes('session_id: "uuid-b"'), `003 应归 b:\n${head(`${d}-003-untitled`)}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -36,7 +36,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { collectJobs, DEFAULT_LEVELS, parseLevels, pathsForFile, prepareGroup, processFile, type LevelName } from "../src/cli.ts";
+import { avoidForeignBase, collectJobs, convertGroup, DEFAULT_LEVELS, parseLevels, pathsForFile, prepareGroup, processFile, type LevelName } from "../src/cli.ts";
 import { GARDEN_LEVELS, isGardenLevel, openFile, pickHighestLevelFile, type GardenLevel } from "../src/open.ts";
 import { gardenDirForSessionDir, gardenRootForSessionDir, listAllSessions, listProjectSessions } from "../src/session-list.ts";
 import { GardenSelectorComponent, deleteGardenOutputs, deleteSessionFile } from "./garden-selector.ts";
@@ -82,7 +82,11 @@ export function convertSessionFile(sessionFile: string, levels: readonly LevelNa
   const outDir = path.join(p.outRoot, p.sub);
   const prepared = prepareGroup([{ src: sessionFile, sub: p.sub }], () => {});
   if (prepared.length === 0) return null;
-  return { ...processFile(prepared[0], outDir, levels), base: prepared[0].base };
+  // 单 session 组的编号永远从当日 001 起（编号是组内全局属性，live 路径看不到兄弟），
+  // 与同 slug 的兄弟文件撞车会**覆盖别人的 md**（2026-09-15 Ctrl+N 后 node11 被顶掉实例）
+  // → 撞车递增避让，永不覆盖别的 session；序号短暂不准由下次组转换（all / CLI）归位
+  const one = { ...prepared[0], base: avoidForeignBase(outDir, prepared[0].base, prepared[0].id) };
+  return { ...processFile(one, outDir, levels), base: one.base };
 }
 
 export default function (pi: ExtensionAPI) {
@@ -149,17 +153,33 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         const { jobs, defaultOut } = collectJobs(sessionsDir);
+        // 编号是同目录内的全局属性 → 按子目录分组走 convertGroup（组内编号计划 + 旧命名清理），
+        // 与 CLI 目录模式同路径；曾有的两个 bug：全量 prepareGroup 跨子目录编号错乱、
+        // 不清旧命名文件（编号撞车残留永远留着）
+        const groups = new Map<string, typeof jobs>();
+        for (const job of jobs) {
+          const list = groups.get(job.sub) ?? [];
+          list.push(job);
+          groups.set(job.sub, list);
+        }
         let updated = 0;
         let failed = 0;
-        const prepared = prepareGroup(jobs, () => { failed++; });
-        for (const p of prepared) {
-          try {
-            if (processFile(p, path.join(defaultOut, p.job.sub), cfg.levels).written.length) updated++;
-          } catch {
+        let removed = 0;
+        for (const [sub, groupJobs] of groups) {
+          const { results, removed: r } = convertGroup(groupJobs, path.join(defaultOut, sub), cfg.levels, () => {
             failed++;
+          });
+          removed += r;
+          for (const { written, error } of results) {
+            if (error) failed++;
+            else if (written.length) updated++;
           }
         }
-        notify(ctx, `garden all: ${jobs.length} 个 session，${updated} 更新${failed ? `，${failed} 失败` : ""} → ${defaultOut}`, failed ? "warning" : "info");
+        notify(
+          ctx,
+          `garden all: ${jobs.length} 个 session，${updated} 更新${removed ? `，清理 ${removed} 个旧文件` : ""}${failed ? `，${failed} 失败` : ""} → ${defaultOut}`,
+          failed ? "warning" : "info",
+        );
         return;
       }
       const msg = convertCurrent(ctx);

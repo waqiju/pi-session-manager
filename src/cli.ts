@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -93,16 +93,18 @@ export function collectJobs(input: string): { jobs: Job[]; target: string | null
   return { jobs, target: null, defaultOut: path.join(path.dirname(input), "garden") };
 }
 
-/** 增量判断：mtime 较新且含当前版本标记才算已是最新（逻辑变更后自动全量刷新） */
-export function isUpToDate(outPath: string, srcMtime: number): boolean {
+/**
+ * 增量判断：mtime 较新、含当前版本标记、且**归属本 session** 才算已是最新（逻辑变更后自动全量刷新）。
+ * 归属校验防编号撞车后遗症：live 转换曾把别 session 的内容写进本 base（单 session 组永远 001，
+ * 见 extensions/garden.ts convertSessionFile），不查 session_id 会把别人的文件当“最新”而跳过，
+ * 被撞的 session 永远恢复不了（2026-09-15 实例）。
+ */
+export function isUpToDate(outPath: string, srcMtime: number, sessionId?: string): boolean {
   if (!existsSync(outPath)) return false;
   if (statSync(outPath).mtimeMs < srcMtime) return false;
-  try {
-    const head = readFileSync(outPath, "utf8");
-    return head.includes(`version: ${JSON.stringify(GARDEN_VERSION)}`);
-  } catch {
-    return false;
-  }
+  const head = readHead(outPath);
+  if (sessionId !== undefined && !head.includes(`session_id: ${JSON.stringify(sessionId)}`)) return false;
+  return head.includes(`version: ${JSON.stringify(GARDEN_VERSION)}`);
 }
 
 export interface Prepared {
@@ -179,6 +181,8 @@ export function indexOutputsBySessionId(outDir: string): Map<string, string[]> {
  * 删除本会话的旧命名文件（改名/重编号/命名方案迁移产生的孤儿）。
  * 只认 frontmatter uuid：其他 session 的文件 uuid 不匹配，误删不了；
  * 源 jsonl 已删除的孤儿输出不在任何 session 的匹配范围内，会保留（归档语义）。
+ * 删除前**重读文件头复核当前归属**：index 是循环前快照，循环内编号交接（别的 session
+ * 被重命名/重编号到这个 base）可能已改写文件内容，快照过期会误删别人的新文件。
  */
 export function removeStaleOutputs(index: Map<string, string[]>, outDir: string, sessionId: string, keepBase: string): number {
   const key = JSON.stringify(sessionId);
@@ -188,6 +192,9 @@ export function removeStaleOutputs(index: Map<string, string[]>, outDir: string,
   let removed = 0;
   for (const f of files) {
     if (f.replace(OUT_FILE_RE, "") === keepBase) continue;
+    // 复核：读不出 head 或当前归属已变 → 不删
+    const head = readHead(path.join(outDir, f));
+    if (!head.includes(`session_id: ${key}`)) continue;
     try {
       unlinkSync(path.join(outDir, f));
       removed++;
@@ -246,26 +253,25 @@ export function runSync(
   let updated = 0, fresh = 0, failed = 0;
   for (const [sub, groupJobs] of groups) {
     const outDir = path.join(outRoot, sub);
-    const prepared = prepareGroup(groupJobs, (job) => {
+    const staleIndex = indexOutputsBySessionId(outDir); // syncCleanup 孤儿判定基线（转换前快照，convertGroup 不动它）
+    const { results, prepared } = convertGroup(groupJobs, outDir, levels, (job) => {
       failed++;
       console.error(`  ✗ ${path.join(sub, path.basename(job.src))}: 读取/解析失败`);
     });
     for (const p of prepared) validIds.add(p.id);
-    const staleIndex = indexOutputsBySessionId(outDir);
-    const syncIdx = new Map(staleIndex); // syncCleanup 用独立副本（removeStaleOutputs 会 delete key）
-    for (const p of prepared) {
+    for (const { p, written, error } of results) {
       const rel = path.join(sub, path.basename(p.job.src));
-      try {
-        removeStaleOutputs(staleIndex, outDir, p.id, p.base);
-        const { written } = processFile(p, outDir, levels);
-        if (written.length) { updated++; console.log(`  ✓ ${rel} → ${p.base} (${written.map((l) => `.${l}.md`).join(" ")})`); }
-        else fresh++;
-      } catch (e) {
+      if (error) {
         failed++;
-        console.error(`  ✗ ${rel}: ${(e as Error).message}`);
+        console.error(`  ✗ ${rel}: ${error.message}`);
+      } else if (written.length) {
+        updated++;
+        console.log(`  ✓ ${rel} → ${p.base} (${written.map((l) => `.${l}.md`).join(" ")})`);
+      } else {
+        fresh++;
       }
     }
-    for (const [k, v] of syncIdx) {
+    for (const [k, v] of staleIndex) {
       const list = fullIndex.get(k) ?? [];
       for (const f of v) list.push(path.join(sub, f));
       fullIndex.set(k, list);
@@ -290,7 +296,7 @@ export function processFile(p: Prepared, outDir: string, levels: readonly LevelN
   for (const { name, render } of LEVELS) {
     if (!levels.includes(name)) continue;
     const outPath = path.join(outDir, `${p.base}.${name}.md`);
-    if (isUpToDate(outPath, p.srcMtime)) {
+    if (isUpToDate(outPath, p.srcMtime, p.id)) {
       skipped.push(name);
       continue;
     }
@@ -299,6 +305,81 @@ export function processFile(p: Prepared, outDir: string, levels: readonly LevelN
     written.push(name);
   }
   return { written, skipped };
+}
+
+/** base 文件名结构：<日期>-<序号>-<slug>（避让递增序号用） */
+const BASE_SEQ_RE = /^(\d{4}-\d{2}-\d{2})-(\d{3})-(.+)$/;
+
+/** outDir 内该 base 的任一级别文件是否被别的 session 占用（读不出 session_id 的保守视为占用） */
+function baseTakenByOther(outDir: string, base: string, sessionId: string): boolean {
+  let names: string[];
+  try {
+    names = readdirSync(outDir);
+  } catch {
+    return false; // 目录不存在 = 无占用
+  }
+  const self = JSON.stringify(sessionId);
+  for (const name of names) {
+    if (!name.startsWith(`${base}.l`) || !OUT_FILE_RE.test(name)) continue;
+    const m = readHead(path.join(outDir, name)).match(/^session_id: ("(?:[^"\\]|\\.)*")$/m);
+    if (m?.[1] !== self) return true;
+  }
+  return false;
+}
+
+/**
+ * live 转换（单 session 组）的编号避让：单 session 组算出的序号永远是当日 001，
+ * 直接写会覆盖同日已有的同 slug 文件（2026-09-15 Ctrl+N 后 node11 被 node-new 顶掉实例）。
+ * 这里撞车时递增序号直到空位/本 session 已占用——**永不覆盖别人的文件**，防毁数据优先；
+ * 序号可能与时间序短暂不符，下次组转换（all / CLI）会归位。
+ * 全量路径不用它：那里 planBaseNames 看到全组，编号本来就准，冲突文件应直接重写归位。
+ */
+export function avoidForeignBase(outDir: string, base: string, sessionId: string): string {
+  const m = base.match(BASE_SEQ_RE);
+  if (!m) return base;
+  let n = Number(m[2]);
+  let candidate = base;
+  while (baseTakenByOther(outDir, candidate, sessionId)) {
+    n++;
+    candidate = `${m[1]}-${String(n).padStart(3, "0")}-${m[3]}`;
+  }
+  return candidate;
+}
+
+/** convertGroup 单条结果 */
+export interface ConvertGroupItem {
+  p: Prepared;
+  written: string[];
+  error?: Error;
+}
+
+/**
+ * 同组（同一输出目录）统一转换：组内编号计划（编号是组内全局属性，必须整组 planBaseNames）
+ * + 旧命名清理（removeStaleOutputs）+ 增量写。CLI 目录模式 / --sync / 扩展 /gardener-output all
+ * 共用，保证三条路径的编号与清理语义一致。单文件模式传 include 过滤（兄弟只参与编号不写输出）。
+ */
+export function convertGroup(
+  groupJobs: Job[],
+  outDir: string,
+  levels: readonly LevelName[],
+  onError: (job: Job, err: Error) => void,
+  include?: (p: Prepared) => boolean,
+): { results: ConvertGroupItem[]; removed: number; prepared: Prepared[] } {
+  const prepared = prepareGroup(groupJobs, onError);
+  const index = indexOutputsBySessionId(outDir);
+  const results: ConvertGroupItem[] = [];
+  let removed = 0;
+  for (const p of prepared) {
+    if (include && !include(p)) continue;
+    try {
+      removed += removeStaleOutputs(index, outDir, p.id, p.base);
+      const { written } = processFile(p, outDir, levels);
+      results.push({ p, written });
+    } catch (e) {
+      results.push({ p, written: [], error: e as Error });
+    }
+  }
+  return { results, removed, prepared };
 }
 
 function main(): void {
@@ -345,26 +426,27 @@ function main(): void {
   let removed = 0;
   for (const [sub, groupJobs] of groups) {
     const outDir = path.join(outRoot, sub);
-    const prepared = prepareGroup(groupJobs, (job) => {
-      failed++;
-      console.error(`  ✗ ${path.join(sub, path.basename(job.src))}: 读取/解析失败`);
-    });
-    const index = indexOutputsBySessionId(outDir);
-    for (const p of prepared) {
-      if (target && p.job.src !== target) continue; // 单文件模式：兄弟只参与编号
-      const rel = path.join(sub, path.basename(p.job.src));
-      try {
-        removed += removeStaleOutputs(index, outDir, p.id, p.base);
-        const { written } = processFile(p, outDir, levels);
-        if (written.length) {
-          updated++;
-          console.log(`  ✓ ${rel} → ${p.base} (${written.map((l) => `.${l}.md`).join(" ")})`);
-        } else {
-          fresh++;
-        }
-      } catch (e) {
+    const { results, removed: r } = convertGroup(
+      groupJobs,
+      outDir,
+      levels,
+      (job) => {
         failed++;
-        console.error(`  ✗ ${rel}: ${(e as Error).message}`);
+        console.error(`  ✗ ${path.join(sub, path.basename(job.src))}: 读取/解析失败`);
+      },
+      target ? (p) => p.job.src === target : undefined, // 单文件模式：兄弟只参与编号
+    );
+    removed += r;
+    for (const { p, written, error } of results) {
+      const rel = path.join(sub, path.basename(p.job.src));
+      if (error) {
+        failed++;
+        console.error(`  ✗ ${rel}: ${error.message}`);
+      } else if (written.length) {
+        updated++;
+        console.log(`  ✓ ${rel} → ${p.base} (${written.map((l) => `.${l}.md`).join(" ")})`);
+      } else {
+        fresh++;
       }
     }
   }

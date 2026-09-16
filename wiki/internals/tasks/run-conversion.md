@@ -20,8 +20,10 @@ node src/cli.ts ... -o <输出目录>
 ```
 
 - 输出默认在 sessions 的同级 `garden/`，目录结构镜像 sessions 的子目录
-- 增量：输出 mtime ≥ 源 mtime 且 frontmatter `version` 等于当前 `GARDEN_VERSION` 才跳过；
-  想全量重生成，bump `GARDEN_VERSION`（见 Related 的 tune-budget）
+- 增量：输出 mtime ≥ 源 mtime、frontmatter `version` 等于当前 `GARDEN_VERSION`、且
+  frontmatter `session_id` 等于本 session 才跳过；想全量重生成，bump `GARDEN_VERSION`
+  （见 Related 的 tune-budget）。session_id 校验是撞车自愈的关键：live 转换曾把别 session
+  的内容写进本 base，不查归属会把别人的文件当“最新”永久跳过
 - 正在写入的活跃 session 转换安全（parser 容忍残缺末行），下次运行会补上新内容
 
 ## Verify
@@ -38,6 +40,7 @@ node src/cli.ts ... -o <输出目录>
 | 改了渲染代码但输出没变 | 忘了 bump `GARDEN_VERSION`——增量判断把旧输出当作最新 |
 | 某个 session 转换失败 | 错误会打印 `✗ <file>: <原因>`，其余不受影响；多为文件读写权限问题 |
 | 找不到 `.mono/` 等嵌套目录的转换结果 | 已知限制：当前只扫一层子目录，见 wiki/internals/concepts/system-map.md |
+| 选择器里某 session 显示成别的内容/消失 | 编号撞车残留（live 转换单 session 组序号撞同日兄弟）。0.3.5 起已防：live 路径撞车避让不覆写，`/gardener-output all` 单遍自愈（增量含 session_id 归属校验 + 删除前复核）。旧版本跑一遍 `/gardener-output all` 也可恢复 |
 
 ## Related
 

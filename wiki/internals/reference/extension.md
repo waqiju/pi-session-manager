@@ -107,6 +107,11 @@ session_id 清全部 md 产物；内存移除，**不做内建那样的全量重
 - **成功路径静默**：自动触发不 notify；失败仅 notify 一次（相同错误去重，防 live 刷屏）。
 - **不阻塞主流程**：转换是同步 CPU 工作（最大 session ≈0.5s），但所有事件处理器内失败只告警。
 - **与 CLI 无冲突**：同一套增量判断；扩展管当前 session，CLI / `/garden all` 管全量。
+- **live 编号避让**：live 转换是单 session 组，`planBaseNames` 永远给当日 001；撞车（同 slug
+  兄弟已占用）时递增序号避让，**永不覆盖别的 session 的文件**；序号短暂不准由下次
+  `/gardener-output all`（或 CLI）归位——全量路径整组编号，不需要避让。
+- **全量路径自净**：`/gardener-output all` 与 CLI 目录模式共用 `convertGroup`（按子目录分组
+  编号 + `removeStaleOutputs` 清旧命名；删除前复核文件当前归属，重编号交接不误删）。
 
 ## 相关
 
