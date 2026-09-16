@@ -15,7 +15,7 @@ import {
 } from "../extensions/garden-selector.ts";
 import type { SessionListItem } from "../src/session-list.ts";
 import { buildSessionTree, flattenSessionTree } from "../src/session-tree.ts";
-import { stripAnsi } from "../src/textwidth.ts";
+import { stripAnsi, visibleWidth } from "../src/textwidth.ts";
 
 // ---------- 测试桩 ----------
 
@@ -155,6 +155,40 @@ test("LineInput: 插入/退格/光标移动/ctrl+u/粘贴换行变空格", () =>
   assert.equal(input.getValue(), "line1 ");
   // 不识别的 escape 序列不消费
   assert.equal(input.handleInput("\x1b[1;5D"), false);
+});
+
+test("LineInput: 渲染假光标（反显块）+ CURSOR_MARKER（对齐 pi-tui Input）", () => {
+  const input = new LineInput();
+  input.setValue("旧名"); // setValue 后光标在尾
+  const end = input.render(40, "❯ ", true);
+  // 行尾光标：反显空格块（pi Input 同款）；marker 在假光标前（IME 定位点 = 光标列）
+  assert.ok(end.includes("\x1b[7m \x1b[27m"), `行尾反显空格块: ${JSON.stringify(end)}`);
+  const mi = end.indexOf("\x1b_pi:c\x07");
+  assert.ok(mi !== -1 && mi < end.indexOf("\x1b[7m"), "marker 在假光标前");
+  // stripAnsi 后 = prompt + 文本 + 行尾空格占位
+  assert.equal(stripAnsi(end), "❯ 旧名 ");
+  // 光标左移一格：反显光标处字符，不额外占列
+  input.handleInput("\x1b[D");
+  const mid = input.render(40, "❯ ", true);
+  assert.ok(mid.includes("\x1b[7m名\x1b[27m"), `反显光标处字符: ${JSON.stringify(mid)}`);
+  assert.equal(stripAnsi(mid), "❯ 旧名");
+  // 宽字符光标：反显整个宽字符
+  input.handleInput("\x1b[H");
+  const wide = input.render(40, "❯ ", true);
+  assert.ok(wide.includes("\x1b[7m旧\x1b[27m"), `宽字符反显: ${JSON.stringify(wide)}`);
+  // 不聚焦：无 marker，假光标仍在（与 pi Input 一致：反显块不看 focused）
+  const unfocused = input.render(40, "❯ ", false);
+  assert.ok(!unfocused.includes("\x1b_pi:c\x07"));
+  assert.ok(unfocused.includes("\x1b[7m旧\x1b[27m"));
+});
+
+test("LineInput: 超宽截断时 marker 与假光标存活、宽度受控", () => {
+  const input = new LineInput();
+  input.setValue("x".repeat(60)); // 光标在尾
+  const line = input.render(20, "❯ ", true); // budget = 18 → 触发截断路径
+  assert.ok(line.includes("\x1b_pi:c\x07"), `截断后 marker 存活: ${JSON.stringify(line)}`);
+  assert.ok(line.includes("\x1b[7m"), `截断后假光标序列存活: ${JSON.stringify(line)}`);
+  assert.ok(visibleWidth(line) <= 20, `截断后宽度受控: ${visibleWidth(line)}`);
 });
 
 // ---------- 组件 ----------

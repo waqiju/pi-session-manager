@@ -174,18 +174,31 @@ export class LineInput {
     return true;
   }
 
-  /** 渲染为一行：prompt + 文本；聚焦时光标处嵌 CURSOR_MARKER；超宽时窗口跟随光标 */
+  /**
+   * 渲染为一行：prompt + 文本；光标处渲染反显假光标（`\x1b[7m…\x1b[27m`，对齐 pi-tui
+   * Input.render / editor.js）；聚焦时假光标前再嵌 CURSOR_MARKER（IME/硬件光标定位）。
+   * 超宽时窗口跟随光标。
+   *
+   * 为什么必须有假光标：pi 的 showHardwareCursor 默认关（settings-manager.js
+   * getShowHardwareCursor = settings ?? PI_HARDWARE_CURSOR==="1"），CURSOR_MARKER 链路
+   * 默认以 `\x1b[?25l` 隐藏真光标收尾 —— 反显块是默认配置下唯一可见的光标
+   * （2026-09-15 rename 无光标事故的根因：当时只嵌了 marker）。
+   */
   render(width: number, prompt: string, focused = true): string {
     const budget = Math.max(1, width - visibleWidth(prompt));
     const before = this.chars.slice(0, this.cursor).join("");
-    const after = this.chars.slice(this.cursor).join("");
+    // 光标处的字符（行尾用空格兜底：反显空格 = 块光标，与 pi Input 一致）；
+    // 按 code point 取（与本类编辑粒度一致，不劈代理对；ZWJ 簇只反显首个 code point，可接受）
+    const atCursor = this.chars[this.cursor] ?? " ";
+    const afterCursor = this.chars.slice(this.cursor + 1).join("");
     const marker = focused ? CURSOR_MARKER : "";
-    let text = before + marker + after;
-    if (visibleWidth(before) + visibleWidth(after) > budget) {
+    const fakeCursor = `\x1b[7m${atCursor}\x1b[27m`;
+    let text = before + marker + fakeCursor + afterCursor;
+    if (visibleWidth(before) + visibleWidth(atCursor) + visibleWidth(afterCursor) > budget) {
       // 光标左侧优先占满预算（搜索框场景光标通常在尾部）
       const b = truncateToWidth(before, budget - 1, "");
       const head = visibleWidth(b) < visibleWidth(before) ? "…" + b : b;
-      text = truncateToWidth(head + marker + after, width - visibleWidth(prompt), "");
+      text = truncateToWidth(head + marker + fakeCursor + afterCursor, width - visibleWidth(prompt), "");
     }
     return prompt + text;
   }
