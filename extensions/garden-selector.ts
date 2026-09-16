@@ -17,7 +17,7 @@ import { unlink } from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
 import { indexOutputsBySessionId } from "../src/cli.ts";
-import { GARDEN_LEVELS } from "../src/open.ts";
+import { GARDEN_LEVELS, pickHighestLevelFile } from "../src/open.ts";
 import type { SessionListItem } from "../src/session-list.ts";
 import {
   buildSessionTree,
@@ -271,31 +271,70 @@ export function formatSizeLabel(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
+/** YYYY-MM-DD（本地时区）；复制文本用绝对日期——相对时间（"2d"）在粘贴后失真 */
+export function formatDate(d: Date): string {
+  const p = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** 复制文本里单个 session 的文件信息（调用方解析：组件 = 最高存在级别 + statSync） */
+export interface SubtreeFileInfo {
+  /** 实际存在的最高级别 md 绝对路径（级别由扩展名标示） */
+  path: string;
+  /** 文件大小（字节）；stat 失败为 null → 显示 "?" */
+  size: number | null;
+}
+
+/** 摘要清洗：控制字符/换行 → 空格，折叠空白 */
+function cleanInline(t: string): string {
+  return t.replace(/[\x00-\x1f\x7f]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** 节点标签：name 优先；无名回退首条用户消息摘要（~50 列截断，加引号区别于命名）；皆无 → untitled */
+function nodeLabel(s: SessionListItem): string {
+  const name = cleanInline(s.name ?? "");
+  if (name) return name;
+  const excerpt = cleanInline(s.firstMessage ?? "");
+  return excerpt ? `"${truncateToWidth(excerpt, 50, "…")}"` : "untitled";
+}
+
 /**
- * 子树复制文本：树形（name + msgs）+ l3 路径清单（~ 缩短 + size + msgs）。
- * flat = flattenSessionTree([子树根]) 的结果（depth 相对子树根）。
- * sizeOf 注入文件 stat（组件用 statSync，测试传 stub）；只 stat 不读正文。
- * l3 文件可能不存在（导出级别未含 l3）→ size "?"；路径照列（提示行已说明 l1 同名）。
+ * 子树复制文本（粘贴给其他 AI 作 context）：自解释头部 + 编号树（内联元数据）+ 绝对路径清单。
+ * 设计要点：
+ * - 目标 AI 零背景可读：头部说清 fork 语义 / 编号对应 / l1-l3 级别规则；
+ * - 不读文件即可判断相关性：树行内联 名称/msgs/size/日期；
+ * - [n] 编号对齐树节点与路径（模型不擅长数行数）；
+ * - 绝对路径（部分读文件工具不展开 ~）；
+ * - 日期用绝对值（相对时间在粘贴后失真）。
+ * flat = flattenSessionTree([子树根]) 的结果（depth 相对子树根）；只 stat 不读正文。
  */
-export function buildSubtreeCopyText(flat: FlatNode[], sizeOf: (absPath: string) => number | null): string {
-  const lines: string[] = ["## Garden Session Subtree", ""];
+export function buildSubtreeCopyText(flat: FlatNode[], resolveFile: (item: SessionListItem) => SubtreeFileInfo): string {
+  const infos = flat.map((n) => resolveFile(n.session));
+  const known = infos.filter((i) => i.size !== null).length;
+  const total = known > 0 ? ` · 合计 ~${formatSizeLabel(infos.reduce((a, i) => a + (i.size ?? 0), 0))}` : "";
+  const root = flat[0].session;
+  const lines: string[] = [
+    `# 会话子树索引（共 ${flat.length} 条对话${total} · 项目 ${root.cwd}）`,
+    "",
+    "一组关联 AI 对话的索引：子会话由父会话 fork（继承其上下文起点）。每条对话的完整内容",
+    "是下方同编号的本地 md 文件，可直接用工具读取。同名 .l1.md（如存在）比 .l3.md 含更多",
+    "工具调用与推理细节。请按名称/消息数/大小/日期选读。",
+    "",
+    "## 树",
+    "",
+  ];
   flat.forEach((n, i) => {
-    const s = n.session;
-    const name = (s.name?.replace(/[\x00-\x1f\x7f]/g, " ").trim() ?? "") || "untitled";
+    const meta = `${n.session.messageCount} msgs · ${formatSizeLabel(infos[i].size)} · ${formatDate(n.session.modified)}`;
     if (i === 0) {
-      lines.push(`根: ${name} (${s.messageCount} msgs)`);
+      lines.push(`[1] ${nodeLabel(n.session)} — ${meta}`);
       return;
     }
     // 前缀跳过 ancestorContinues 首槽（子树根一级，屏幕上用于缩进对齐，导出文本顶格即可）
     const parts = n.ancestorContinues.slice(1).map((c) => (c ? "│  " : "   "));
-    lines.push(`${parts.join("")}${n.isLast ? "└─ " : "├─ "}${name} (${s.messageCount} msgs)`);
+    lines.push(`${parts.join("")}${n.isLast ? "└─ " : "├─ "}[${i + 1}] ${nodeLabel(n.session)} — ${meta}`);
   });
-  lines.push("", "文件路径（l3 = 纯问答视图；同名 .l1.md 含工具细节和完整推理）:");
-  for (const n of flat) {
-    const s = n.session;
-    const abs = path.join(s.mdDir, `${s.mdBase}.l3.md`);
-    lines.push(`  ${shortenPath(abs)}  ${formatSizeLabel(sizeOf(abs))}  ${s.messageCount} msgs`);
-  }
+  lines.push("", "## 文件", "");
+  flat.forEach((n, i) => lines.push(`[${i + 1}] ${infos[i].path}`));
   return lines.join("\n") + "\n";
 }
 
@@ -527,12 +566,16 @@ export class GardenSelectorComponent {
       this.requestRender();
       return;
     }
-    const text = buildSubtreeCopyText(subtree, (p) => {
+    // 每个 session 取实际存在的最高级别 md（导出级别不含 l3 时不产死链）；stat 失败 → size null
+    const text = buildSubtreeCopyText(subtree, (item) => {
+      const p = pickHighestLevelFile(item.mdDir, item.mdBase) ?? path.join(item.mdDir, `${item.mdBase}.l3.md`);
+      let size: number | null = null;
       try {
-        return statSync(p).size;
+        size = statSync(p).size;
       } catch {
-        return null;
+        /* 文件不存在等 → null */
       }
+      return { path: p, size };
     });
     const r = this.opts.copyToClipboard(text);
     if (r.ok) {

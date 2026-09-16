@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
 import * as os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -6,6 +7,7 @@ import {
   buildSubtreeCopyText,
   COPY_SUBTREE_MAX,
   formatAge,
+  formatDate,
   formatSizeLabel,
   GardenSelectorComponent,
   isCtrlLetter,
@@ -308,27 +310,39 @@ test("formatSizeLabel: 各量级", () => {
   assert.equal(formatSizeLabel(1258291), "1.2MB");
 });
 
-test("buildSubtreeCopyText: 树形 + 路径清单（~ 缩短 / untitled / size 缺失）", () => {
-  const homeDir = os.homedir();
-  const root = makeItem({
-    mdBase: "aaa",
-    name: "根会话",
-    messageCount: 10,
-    mdDir: path.join(homeDir, ".pi/agent/garden/--s--"),
+test("buildSubtreeCopyText: 自解释头部 + 编号树（内联元数据）+ 绝对路径清单", () => {
+  const root = makeItem({ mdBase: "aaa", name: "根会话", messageCount: 10, modified: new Date("2026-09-14T12:00:00Z") });
+  const child = makeItem({
+    mdBase: "bbb",
+    parentSessionPath: "/tmp/x/sessions/--s--/aaa.jsonl",
+    messageCount: 5,
+    firstMessage: "帮我看看这个报错",
+    modified: new Date("2026-09-15T12:00:00Z"),
   });
-  const child = makeItem({ mdBase: "bbb", parentSessionPath: "/tmp/x/sessions/--s--/aaa.jsonl", messageCount: 5 });
-  const grand = makeItem({ mdBase: "ccc", parentSessionPath: "/tmp/x/sessions/--s--/bbb.jsonl", messageCount: 2 });
+  const grand = makeItem({
+    mdBase: "ccc",
+    parentSessionPath: "/tmp/x/sessions/--s--/bbb.jsonl",
+    messageCount: 2,
+    firstMessage: "",
+    modified: new Date("2026-09-15T12:00:00Z"),
+  });
   const [tree] = buildSessionTree([root, child, grand]); // child/grand 挂 root 下，唯一 root
   const flat = flattenSessionTree([tree]);
-  const text = buildSubtreeCopyText(flat, (p) => (p.endsWith("aaa.l3.md") ? 8192 : null));
+  const text = buildSubtreeCopyText(flat, (item) => ({
+    path: `${item.mdDir}/${item.mdBase}.l3.md`,
+    size: item.mdBase === "aaa" ? 8192 : item.mdBase === "bbb" ? 2048 : null,
+  }));
+  const d = (s: SessionListItem): string => formatDate(s.modified);
   const lines = text.split("\n");
-  assert.equal(lines[0], "## Garden Session Subtree");
-  assert.equal(lines[2], "根: 根会话 (10 msgs)");
-  assert.equal(lines[3], "└─ untitled (5 msgs)", "depth-1 子节点顶格（跳过子树根槽位）");
-  assert.equal(lines[4], "   └─ untitled (2 msgs)");
-  assert.ok(lines[6].startsWith("文件路径（l3 = 纯问答视图"), lines[6]);
-  assert.ok(lines[7].includes("~/.pi/agent/garden/--s--/aaa.l3.md  8KB  10 msgs"), lines[7]);
-  assert.ok(lines[8].includes("/tmp/x/garden/--s--/bbb.l3.md  ?  5 msgs"), lines[8]);
+  assert.equal(lines[0], `# 会话子树索引（共 3 条对话 · 合计 ~10KB · 项目 /tmp/proj）`);
+  assert.ok(lines[2].includes("fork"), "头部自解释 fork 语义");
+  assert.equal(lines[6], "## 树");
+  assert.equal(lines[8], `[1] 根会话 — 10 msgs · 8KB · ${d(root)}`);
+  assert.equal(lines[9], `└─ [2] "帮我看看这个报错" — 5 msgs · 2KB · ${d(child)}`, "无名回退首条消息摘要");
+  assert.equal(lines[10], `   └─ [3] untitled — 2 msgs · ? · ${d(grand)}`, "无名且无摘要 → untitled；size 缺失 → ?");
+  assert.equal(lines[12], "## 文件");
+  assert.equal(lines[14], "[1] /tmp/x/garden/--s--/aaa.l3.md");
+  assert.equal(lines[16], "[3] /tmp/x/garden/--s--/ccc.l3.md");
   assert.ok(text.endsWith("\n"));
 });
 
@@ -345,6 +359,7 @@ test("选择器: Ctrl+Y 复制子树（叶子 / 整树 / 搜索态 / 失败 / �
     mdBase: "ccc",
     parentSessionPath: "/tmp/x/sessions/--s--/bbb.jsonl",
     messageCount: 2,
+    firstMessage: "",
     modified: new Date("2026-09-14T03:00:00Z"),
   });
   const other = makeItem({ mdBase: "zzz", name: "别家", messageCount: 99, modified: new Date("2026-09-14T04:00:00Z") });
@@ -355,16 +370,17 @@ test("选择器: Ctrl+Y 复制子树（叶子 / 整树 / 搜索态 / 失败 / �
   assert.ok(plain(h.c).includes("Ctrl+Y 复制子树"), "hint 常驻");
   h.c.handleInput("\x19"); // ctrl+y legacy
   assert.equal(h.copied.length, 1);
-  assert.ok(h.copied[0].includes("根: 别家 (99 msgs)"), h.copied[0]);
-  assert.ok(!h.copied[0].includes("子会话"), "叶子不连带别的树");
+  assert.ok(h.copied[0].startsWith("# 会话子树索引（共 1 条对话 · 项目 /tmp/proj）"), h.copied[0]);
+  assert.ok(h.copied[0].includes("[1] 别家 — 99 msgs"), h.copied[0]);
+  assert.ok(!h.copied[0].includes("[2]"), "叶子不连带别的树");
 
   // 下移到 root → Kitty CSI-u 编码复制整棵子树（3 个）
   h.c.handleInput("\x1b[B");
   h.c.handleInput("\x1b[121;5u");
   assert.equal(h.copied.length, 2);
-  assert.ok(h.copied[1].includes("根: 根会话 (10 msgs)"), h.copied[1]);
-  assert.ok(h.copied[1].includes("└─ 子会话 (5 msgs)"));
-  assert.ok(h.copied[1].includes("untitled (2 msgs)"));
+  assert.ok(h.copied[1].includes("[1] 根会话 — 10 msgs"), h.copied[1]);
+  assert.ok(h.copied[1].includes("└─ [2] 子会话 — 5 msgs"));
+  assert.ok(h.copied[1].includes("untitled — 2 msgs"), "无名节点回退摘要/untitled");
   assert.ok(!h.copied[1].includes("别家"));
   assert.ok(plain(h.c).includes("已复制 3 个 session 到剪贴板"), plain(h.c));
 
@@ -374,8 +390,8 @@ test("选择器: Ctrl+Y 复制子树（叶子 / 整树 / 搜索态 / 失败 / �
   h2.c.handleInput("根");
   h2.c.handleInput("\x19");
   assert.equal(h2.copied.length, 1);
-  assert.ok(h2.copied[0].includes("根: 根会话"), h2.copied[0]);
-  assert.ok(h2.copied[0].includes("子会话"), "搜索态复制仍含后代");
+  assert.ok(h2.copied[0].includes("[1] 根会话"), h2.copied[0]);
+  assert.ok(h2.copied[0].includes("[2] 子会话 — 5 msgs"), "搜索态复制仍含后代");
 
   // 剪贴板失败 → error toast，不崩
   const h3 = harness([root], undefined, { copyToClipboard: () => ({ ok: false, error: "无可用剪贴板命令" }) });
@@ -390,6 +406,22 @@ test("选择器: Ctrl+Y 复制子树（叶子 / 整树 / 搜索态 / 失败 / �
   h4.c.handleInput("\x19");
   assert.equal(h4.copied.length, 0);
   assert.ok(!plain(h4.c).includes("Ctrl+Y"));
+});
+
+test("选择器: Ctrl+Y 复制时 l3 缺失回退实际存在级别（真实文件）", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "garden-copy-"));
+  try {
+    fs.writeFileSync(path.join(dir, "aaa.l1.md"), "x".repeat(2048));
+    const root = makeItem({ mdBase: "aaa", name: "根会话", messageCount: 3, mdDir: dir });
+    const h = harness([root]);
+    await flush();
+    h.c.handleInput("\x19");
+    assert.ok(h.copied[0].includes(`[1] ${path.join(dir, "aaa.l1.md")}`), h.copied[0]);
+    assert.ok(h.copied[0].includes("2KB"), "stat 到真实大小");
+    assert.ok(h.copied[0].includes("合计 ~2KB"));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("选择器: 子树超过上限拒绝复制", async () => {

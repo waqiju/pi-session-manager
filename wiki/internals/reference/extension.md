@@ -75,7 +75,9 @@ Tab scope（current/all 都缓存，二次切换零开销）、Ctrl+R 改名（`
 session_id 清全部 md 产物；内存移除，**不做内建那样的全量重载**）。
 新增：Ctrl+N 新建子会话（`ctx.newSession({ parentSession })`；内建选择器已无此键——pi 0.85.1
 把 ctrl+n 默认绑定挪给了 `app.session.toggleNamedFilter`）、Ctrl+Y 复制子树到剪贴板
-（树形 name+msgs + l3 路径清单附 size，粘贴给 AI 作 context；>99 个 session 硬拒；
+（粘贴给其他 AI 作 context，格式为目标 AI 优化：自解释头部说清 fork 语义与级别规则；
+树行内联 `[n] 名称 — msgs · size · 日期`，无名节点回退首条消息摘要；同编号绝对路径清单
+——不用 `~`，部分读文件工具不展开。每个 session 取实际存在的最高级别 md；>99 硬拒；
 平台命令 pbcopy / clip.exe(WSL) / wl-copy / xclip，`buildSubtreeCopyText` 可直测）。
 自有快捷键匹配走 `isCtrlLetter`（garden-selector.ts）：直接认物理键，legacy 控制字符 /
 Kitty CSI-u / modifyOtherKeys 三编码全覆盖（pi-tui 会协商 Kitty flags=7，终端编码不保证

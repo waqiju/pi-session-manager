@@ -2,13 +2,16 @@
 
 - 日期：2026-09-15
 - 项目：garden（pi-session-manager）
-- 状态：**已完成**（v0.4.0）
+- 状态：**已完成**（v0.4.0 落地，v0.4.1 重设计输出格式）
 - 快捷键：**Ctrl+Y**（硬编码物理键。自定义 action 路线不可行：pi 0.85.1 的 KeybindingsManager
   丢弃未定义的 action，用户 keybindings.json 无法补绑；Ctrl+C 是 cancel、Ctrl+Shift+C 被
   Windows Terminal 拦截且 legacy 下与 Ctrl+C 同为 \x03、Alt+C 有 Esc 合并歧义）
 - 落地差异：① `onCopy` 改为 `copyToClipboard(text) => {ok,error?}`（组件需成败结果 toast）；
   ② 树行格式按 §2 示例执行（name + msgs），size 只在路径清单行；③ 树前缀跳过子树根槽位，
   子节点顶格（屏幕渲染的 3 空格前导不进导出文本）
+- v0.4.1 格式重设计（面向目标 AI 可读性）：自解释头部（fork 语义/级别规则/总量/cwd）+
+  编号树内联元数据（`[n] 名称 — msgs · size · 日期`）+ 同编号绝对路径清单（弃用 `~`，
+  部分读文件工具不展开）；无名节点回退首条消息摘要；路径取实际存在最高级别 md
 
 ---
 

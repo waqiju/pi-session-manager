@@ -35,8 +35,9 @@
   + pi 0.85.1 把 ctrl+n 改绑 `app.session.toggleNamedFilter`（`app.session.new` 默认键掏空）
 - **`isCtrlLetter` 编码无关匹配**：legacy 控制字符 / Kitty CSI-u / modifyOtherKeys 三编码
   全覆盖，不借 pi 上游 action 名（上游改绑已坑过一次；自定义 action 进不了 pi 的 KeybindingsManager）
-- **新增 Ctrl+Y 复制子树**：树形（name+msgs）+ l3 路径清单（size+msgs）进剪贴板，
-  供粘贴给其他 AI 作 context；>99 硬拒；平台命令 pbcopy/clip.exe/wl-copy/xclip
+- **新增 Ctrl+Y 复制子树**：v0.4.0 初版，v0.4.1 重设计输出格式（面向目标 AI：自解释头部 /
+  编号对齐树与路径 / 绝对路径 / 无名节点回退摘要 / 实际最高级别）；>99 硬拒；
+  平台命令 pbcopy/clip.exe/wl-copy/xclip
 
 ## 当前性能
 
