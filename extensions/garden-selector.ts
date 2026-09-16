@@ -475,7 +475,7 @@ export class GardenSelectorComponent {
           this.confirmingDelete = selected.session;
         }
       }
-    } else if (this.opts.onNewChild && kb.matches(data, "app.session.new")) {
+    } else if (this.opts.onNewChild && data === "\x0e") {  // Ctrl+N
       const selected = this.flat[this.selectedIndex];
       if (selected) {
         this.setStatus(null);
