@@ -12,7 +12,8 @@
  *   增量判断（mtime + GARDEN_VERSION）在 processFile 内，重复触发几乎零成本。
  *
  * 二、命令：
- *   /garden            → 快速 session 选择器（等位 /resume：fork 树/搜索/删除/重命名。
+ *   /garden            → 快速 session 选择器（等位 /resume：fork 树/搜索/删除/重命名/
+ *                        新建子会话/子树复制到剪贴板。
  *                        数据源 = garden md 产物（不再读 jsonl）；自绘组件零 realpathSync，
  *                        drvfs 上 <3s 就绪（内建组件因 canonicalizePath 卡 ~22s，见
  *                        extensions/garden-selector.ts 头注）
@@ -39,7 +40,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { avoidForeignBase, collectJobs, convertGroup, DEFAULT_LEVELS, parseLevels, pathsForFile, prepareGroup, processFile, type LevelName } from "../src/cli.ts";
 import { GARDEN_LEVELS, isGardenLevel, openFile, pickHighestLevelFile, type GardenLevel } from "../src/open.ts";
 import { gardenDirForSessionDir, gardenRootForSessionDir, listAllSessions, listProjectSessions } from "../src/session-list.ts";
-import { GardenSelectorComponent, deleteGardenOutputs, deleteSessionFile } from "./garden-selector.ts";
+import { GardenSelectorComponent, copyToClipboard, deleteGardenOutputs, deleteSessionFile } from "./garden-selector.ts";
 
 export interface GardenConfig {
   enabled: boolean;
@@ -281,6 +282,7 @@ export default function (pi: ExtensionAPI) {
                 done(null);
                 void ctx.newSession({ parentSession: item.path });
               },
+              copyToClipboard,
               renameSession: async (item, name) => {
                 // 与内建 /resume 同一实现路径；随后立即重转，让 md frontmatter/文件名同步新名
                 const { SessionManager } = (await import("@earendil-works/pi-coding-agent")) as any;

@@ -1,11 +1,20 @@
-# Handoff: garden 选择器子树复制到剪贴板
+# Handoff: garden 选择器子树复制到剪贴板 —— 已完成
 
 - 日期：2026-09-15
 - 项目：garden（pi-session-manager）
-- 状态：**未开始**，需求已定义
-- 快捷键：**待定**（Ctrl+C 冲突 TUI cancel，需选其他键）
+- 状态：**已完成**（v0.4.0）
+- 快捷键：**Ctrl+Y**（硬编码物理键。自定义 action 路线不可行：pi 0.85.1 的 KeybindingsManager
+  丢弃未定义的 action，用户 keybindings.json 无法补绑；Ctrl+C 是 cancel、Ctrl+Shift+C 被
+  Windows Terminal 拦截且 legacy 下与 Ctrl+C 同为 \x03、Alt+C 有 Esc 合并歧义）
+- 落地差异：① `onCopy` 改为 `copyToClipboard(text) => {ok,error?}`（组件需成败结果 toast）；
+  ② 树行格式按 §2 示例执行（name + msgs），size 只在路径清单行；③ 树前缀跳过子树根槽位，
+  子节点顶格（屏幕渲染的 3 空格前导不进导出文本）
 
-## 1. 需求概述
+---
+
+## 原始需求存档
+
+## 1. 需求概述（原始）
 
 在 `/garden` 选择器列表里，按快捷键把当前光标所在 session 的**整棵子树**复制到剪贴板。
 输出的是树结构 + 文件路径（不是拼接内容），供用户粘贴到另一个 AI 对话作为 context，

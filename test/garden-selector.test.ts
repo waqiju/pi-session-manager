@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
+import * as os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
-import { GardenSelectorComponent, LineInput, formatAge, isCtrlN } from "../extensions/garden-selector.ts";
+import {
+  buildSubtreeCopyText,
+  COPY_SUBTREE_MAX,
+  formatAge,
+  formatSizeLabel,
+  GardenSelectorComponent,
+  isCtrlLetter,
+  LineInput,
+} from "../extensions/garden-selector.ts";
 import type { SessionListItem } from "../src/session-list.ts";
+import { buildSessionTree, flattenSessionTree } from "../src/session-tree.ts";
 import { stripAnsi } from "../src/textwidth.ts";
 
 // ---------- 测试桩 ----------
@@ -58,6 +69,7 @@ interface Harness {
   renamed: [string, string][];
   deleted: string[];
   newChildren: string[];
+  copied: string[];
   loadCounts: { current: number; all: number };
 }
 
@@ -73,6 +85,7 @@ function harness(
     renamed: [],
     deleted: [],
     newChildren: [],
+    copied: [],
     loadCounts: { current: 0, all: 0 },
   };
   h.c = new GardenSelectorComponent({
@@ -99,6 +112,10 @@ function harness(
     },
     onNewChild: (item) => {
       h.newChildren.push(item.path);
+    },
+    copyToClipboard: (text) => {
+      h.copied.push(text);
+      return { ok: true };
     },
     ...over,
   });
@@ -242,18 +259,22 @@ test("选择器: 删除流程（ctrl+d → enter 确认 → 列表移除）；�
   assert.ok(!plain(h.c).includes("要删除的"), "删除后从列表移除");
 });
 
-test("isCtrlN: 三种终端编码匹配；修饰键不符/无修饰不匹配", () => {
-  assert.ok(isCtrlN("\x0e"), "legacy SO 控制字符");
-  assert.ok(isCtrlN("\x1b[110;5u"), "Kitty CSI-u");
-  assert.ok(isCtrlN("\x1b[110;5:1u"), "CSI-u 带 event type");
-  assert.ok(isCtrlN("\x1b[110::110;5u"), "CSI-u 带 base layout key");
-  assert.ok(isCtrlN("\x1b[110;69u"), "ctrl + Caps Lock 位（64+4+1）");
-  assert.ok(isCtrlN("\x1b[27;5;110~"), "xterm modifyOtherKeys");
-  assert.ok(!isCtrlN("n"));
-  assert.ok(!isCtrlN("\x1b[110u"), "无修饰 = 纯 n");
-  assert.ok(!isCtrlN("\x1b[110;2u"), "shift+n");
-  assert.ok(!isCtrlN("\x1b[110;3u"), "alt+n");
-  assert.ok(!isCtrlN("\x1b[98;5u"), "ctrl+b 别的键");
+test("isCtrlLetter: 三种终端编码匹配；修饰键不符/无修饰/异字母不匹配", () => {
+  assert.ok(isCtrlLetter("\x0e", "n"), "legacy 控制字符");
+  assert.ok(isCtrlLetter("\x1b[110;5u", "n"), "Kitty CSI-u");
+  assert.ok(isCtrlLetter("\x1b[110;5:1u", "n"), "CSI-u 带 event type");
+  assert.ok(isCtrlLetter("\x1b[110::110;5u", "n"), "CSI-u 带 base layout key");
+  assert.ok(isCtrlLetter("\x1b[110;69u", "n"), "ctrl + Caps Lock 位（64+4+1）");
+  assert.ok(isCtrlLetter("\x1b[27;5;110~", "n"), "xterm modifyOtherKeys");
+  assert.ok(isCtrlLetter("\x19", "y"), "ctrl+y legacy");
+  assert.ok(isCtrlLetter("\x1b[121;5u", "y"), "ctrl+y CSI-u");
+  assert.ok(isCtrlLetter("\x1b[27;5;121~", "y"), "ctrl+y modifyOtherKeys");
+  assert.ok(!isCtrlLetter("n", "n"), "裸字母");
+  assert.ok(!isCtrlLetter("\x1b[110u", "n"), "无修饰 = 纯 n");
+  assert.ok(!isCtrlLetter("\x1b[110;2u", "n"), "shift+n");
+  assert.ok(!isCtrlLetter("\x1b[110;3u", "n"), "alt+n");
+  assert.ok(!isCtrlLetter("\x1b[98;5u", "n"), "ctrl+b 别的键");
+  assert.ok(!isCtrlLetter("\x19", "n"), "ctrl+y 不算 ctrl+n");
 });
 
 test("选择器: Ctrl+N 新建子会话（onNewChild 回调，三种编码）", async () => {
@@ -278,6 +299,114 @@ test("选择器: Ctrl+N 新建子会话（onNewChild 回调，三种编码）", 
   h2.c.handleInput("\x1b[110;5u");
   assert.equal(h2.newChildren.length, 0);
   // \x0e 是 Shift Out（不可打印）、CSI-u 以 ESC 开头：LineInput 不识别 → 不崩即可
+});
+
+test("formatSizeLabel: 各量级", () => {
+  assert.equal(formatSizeLabel(null), "?");
+  assert.equal(formatSizeLabel(500), "500B");
+  assert.equal(formatSizeLabel(8192), "8KB");
+  assert.equal(formatSizeLabel(1258291), "1.2MB");
+});
+
+test("buildSubtreeCopyText: 树形 + 路径清单（~ 缩短 / untitled / size 缺失）", () => {
+  const homeDir = os.homedir();
+  const root = makeItem({
+    mdBase: "aaa",
+    name: "根会话",
+    messageCount: 10,
+    mdDir: path.join(homeDir, ".pi/agent/garden/--s--"),
+  });
+  const child = makeItem({ mdBase: "bbb", parentSessionPath: "/tmp/x/sessions/--s--/aaa.jsonl", messageCount: 5 });
+  const grand = makeItem({ mdBase: "ccc", parentSessionPath: "/tmp/x/sessions/--s--/bbb.jsonl", messageCount: 2 });
+  const [tree] = buildSessionTree([root, child, grand]); // child/grand 挂 root 下，唯一 root
+  const flat = flattenSessionTree([tree]);
+  const text = buildSubtreeCopyText(flat, (p) => (p.endsWith("aaa.l3.md") ? 8192 : null));
+  const lines = text.split("\n");
+  assert.equal(lines[0], "## Garden Session Subtree");
+  assert.equal(lines[2], "根: 根会话 (10 msgs)");
+  assert.equal(lines[3], "└─ untitled (5 msgs)", "depth-1 子节点顶格（跳过子树根槽位）");
+  assert.equal(lines[4], "   └─ untitled (2 msgs)");
+  assert.ok(lines[6].startsWith("文件路径（l3 = 纯问答视图"), lines[6]);
+  assert.ok(lines[7].includes("~/.pi/agent/garden/--s--/aaa.l3.md  8KB  10 msgs"), lines[7]);
+  assert.ok(lines[8].includes("/tmp/x/garden/--s--/bbb.l3.md  ?  5 msgs"), lines[8]);
+  assert.ok(text.endsWith("\n"));
+});
+
+test("选择器: Ctrl+Y 复制子树（叶子 / 整树 / 搜索态 / 失败 / 未注入）", async () => {
+  const root = makeItem({ mdBase: "aaa", name: "根会话", messageCount: 10, modified: new Date("2026-09-14T01:00:00Z") });
+  const child = makeItem({
+    mdBase: "bbb",
+    name: "子会话",
+    parentSessionPath: "/tmp/x/sessions/--s--/aaa.jsonl",
+    messageCount: 5,
+    modified: new Date("2026-09-14T02:00:00Z"),
+  });
+  const grand = makeItem({
+    mdBase: "ccc",
+    parentSessionPath: "/tmp/x/sessions/--s--/bbb.jsonl",
+    messageCount: 2,
+    modified: new Date("2026-09-14T03:00:00Z"),
+  });
+  const other = makeItem({ mdBase: "zzz", name: "别家", messageCount: 99, modified: new Date("2026-09-14T04:00:00Z") });
+
+  // 叶子：默认选中 other（最新排第一）→ 只复制自身
+  const h = harness([root, child, grand, other]);
+  await flush();
+  assert.ok(plain(h.c).includes("Ctrl+Y 复制子树"), "hint 常驻");
+  h.c.handleInput("\x19"); // ctrl+y legacy
+  assert.equal(h.copied.length, 1);
+  assert.ok(h.copied[0].includes("根: 别家 (99 msgs)"), h.copied[0]);
+  assert.ok(!h.copied[0].includes("子会话"), "叶子不连带别的树");
+
+  // 下移到 root → Kitty CSI-u 编码复制整棵子树（3 个）
+  h.c.handleInput("\x1b[B");
+  h.c.handleInput("\x1b[121;5u");
+  assert.equal(h.copied.length, 2);
+  assert.ok(h.copied[1].includes("根: 根会话 (10 msgs)"), h.copied[1]);
+  assert.ok(h.copied[1].includes("└─ 子会话 (5 msgs)"));
+  assert.ok(h.copied[1].includes("untitled (2 msgs)"));
+  assert.ok(!h.copied[1].includes("别家"));
+  assert.ok(plain(h.c).includes("已复制 3 个 session 到剪贴板"), plain(h.c));
+
+  // 搜索态：过滤到 root，仍复制完整后代链
+  const h2 = harness([root, child, grand, other]);
+  await flush();
+  h2.c.handleInput("根");
+  h2.c.handleInput("\x19");
+  assert.equal(h2.copied.length, 1);
+  assert.ok(h2.copied[0].includes("根: 根会话"), h2.copied[0]);
+  assert.ok(h2.copied[0].includes("子会话"), "搜索态复制仍含后代");
+
+  // 剪贴板失败 → error toast，不崩
+  const h3 = harness([root], undefined, { copyToClipboard: () => ({ ok: false, error: "无可用剪贴板命令" }) });
+  await flush();
+  h3.c.handleInput("\x19");
+  assert.equal(h3.copied.length, 0);
+  assert.ok(plain(h3.c).includes("复制失败: 无可用剪贴板命令"), plain(h3.c));
+
+  // 未注入 copyToClipboard → ctrl+y 不消费（落进搜索也无副作用），hint 不显示
+  const h4 = harness([root], undefined, { copyToClipboard: undefined });
+  await flush();
+  h4.c.handleInput("\x19");
+  assert.equal(h4.copied.length, 0);
+  assert.ok(!plain(h4.c).includes("Ctrl+Y"));
+});
+
+test("选择器: 子树超过上限拒绝复制", async () => {
+  const root = makeItem({ mdBase: "aaa", name: "大根", modified: new Date("2026-09-14T01:00:00Z") });
+  const children = Array.from({ length: COPY_SUBTREE_MAX + 1 }, (_, i) =>
+    makeItem({
+      mdBase: `c${String(i).padStart(3, "0")}`,
+      parentSessionPath: "/tmp/x/sessions/--s--/aaa.jsonl",
+      modified: new Date(`2026-09-14T02:${String(i % 60).padStart(2, "0")}:00Z`),
+    }),
+  );
+  const h = harness([root, ...children]);
+  await flush();
+  // root 是唯一树根，默认选中 → 子树 100+1 > 99 硬拒
+  h.c.handleInput("\x19");
+  assert.equal(h.copied.length, 0, "超限不复制");
+  assert.ok(plain(h.c).includes(`子树过大（${COPY_SUBTREE_MAX + 2}>${COPY_SUBTREE_MAX}）`), plain(h.c));
 });
 
 test("选择器: 空目录提示回填命令；加载失败进状态栏", async () => {

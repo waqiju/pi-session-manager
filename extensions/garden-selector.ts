@@ -12,7 +12,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
@@ -25,6 +25,7 @@ import {
   flattenSessionTree,
   parseSearchQuery,
   type FlatNode,
+  type TreeNode,
 } from "../src/session-tree.ts";
 import { truncateToWidth, visibleWidth } from "../src/textwidth.ts";
 
@@ -57,6 +58,8 @@ export interface SelectorOptions {
   renameSession?: (item: SessionListItem, name: string) => Promise<string | undefined>;
   /** 新建子 session（parentSession = 选中项；空 session，pi 自动切换过去） */
   onNewChild?: (item: SessionListItem) => void;
+  /** 复制文本到系统剪贴板（平台命令注入；组件自持 toast 反馈） */
+  copyToClipboard?: (text: string) => { ok: boolean; error?: string };
   /** 删除（jsonl + garden md 产物）；返回 ok/error */
   deleteSession?: (item: SessionListItem) => Promise<{ ok: boolean; error?: string }>;
   /** 终端高度（可选，用于自适应 maxVisible）；不传则回退 process.stdout.rows / 24 */
@@ -229,28 +232,96 @@ export async function deleteGardenOutputs(item: SessionListItem): Promise<number
   return removed;
 }
 
-// ---------- Ctrl+N 匹配（编码无关） ----------
+// ---------- Ctrl+字母 匹配（编码无关） ----------
 
 /** Kitty 协议修饰键里的 Lock 位（Caps Lock + Num Lock），对齐 pi-tui keys.js 的 LOCK_MASK */
 const KITTY_LOCK_MASK = 64 + 128;
 
 /**
- * Ctrl+N 判定，与 pi-tui matchesKey(data, "ctrl+n") 等价但内联，保持本文件零 pi 依赖。
- * 覆盖三种终端编码：
- *   legacy          → "\x0e"（SO 控制字符）
+ * Ctrl+<letter> 判定，与 pi-tui matchesKey(data, "ctrl+<letter>") 等价但内联，保持本文件零 pi 依赖。
+ * 覆盖三种终端编码（以 ctrl+n 为例）：
+ *   legacy          → "\x0e"（控制字符：letter charCode & 0x1f）
  *   Kitty CSI-u     → "\x1b[110;5u"（可带 alternate keys / event type 段；pi-tui 协商 flags=7）
  *   modifyOtherKeys → "\x1b[27;5;110~"（Kitty 不可用时的回退）
  * 不走 kb.matches("app.session.*")：pi 0.85.1 把 ctrl+n 默认绑定从 app.session.new 挪给
- * toggleNamedFilter 已证明上游会改绑；garden 的 Ctrl+N 是自己的功能，直接认物理键。
+ * toggleNamedFilter 已证明上游会改绑；且 pi 的 KeybindingsManager 不认扩展自定义 action，
+ * 用户配置无法补绑。garden 选择器的自有快捷键直接认物理键。
  */
-export function isCtrlN(data: string): boolean {
-  if (data === "\x0e") return true;
-  if (data === "\x1b[27;5;110~") return true;
+export function isCtrlLetter(data: string, letter: string): boolean {
+  const code = letter.charCodeAt(0); // 期望 a-z
+  if (data === String.fromCharCode(code & 0x1f)) return true;
+  if (data === `\x1b[27;5;${code}~`) return true;
   // CSI-u：\x1b[<codepoint>[:shifted[:base]]][;<mod>[:event]]u；mod 值 = 修饰位 + 1，ctrl = 4
   const m = data.match(/^\x1b\[(\d+)(?::\d*)?(?::\d+)?(?:;(\d+))?(?::\d+)?u$/);
   if (!m) return false;
   const modifier = m[2] === undefined ? 0 : Number(m[2]) - 1;
-  return Number(m[1]) === 110 && (modifier & ~KITTY_LOCK_MASK) === 4;
+  return Number(m[1]) === code && (modifier & ~KITTY_LOCK_MASK) === 4;
+}
+
+// ---------- 子树复制（树 + l3 路径清单，粘贴给 AI 作 context） ----------
+
+/** 子树复制上限（防误把巨型树塞进剪贴板；超出硬拒，不截断） */
+export const COPY_SUBTREE_MAX = 99;
+
+/** 文件大小标签：500B / 8KB / 1.2MB；null（文件不存在等）→ "?" */
+export function formatSizeLabel(bytes: number | null): string {
+  if (bytes === null) return "?";
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/**
+ * 子树复制文本：树形（name + msgs）+ l3 路径清单（~ 缩短 + size + msgs）。
+ * flat = flattenSessionTree([子树根]) 的结果（depth 相对子树根）。
+ * sizeOf 注入文件 stat（组件用 statSync，测试传 stub）；只 stat 不读正文。
+ * l3 文件可能不存在（导出级别未含 l3）→ size "?"；路径照列（提示行已说明 l1 同名）。
+ */
+export function buildSubtreeCopyText(flat: FlatNode[], sizeOf: (absPath: string) => number | null): string {
+  const lines: string[] = ["## Garden Session Subtree", ""];
+  flat.forEach((n, i) => {
+    const s = n.session;
+    const name = (s.name?.replace(/[\x00-\x1f\x7f]/g, " ").trim() ?? "") || "untitled";
+    if (i === 0) {
+      lines.push(`根: ${name} (${s.messageCount} msgs)`);
+      return;
+    }
+    // 前缀跳过 ancestorContinues 首槽（子树根一级，屏幕上用于缩进对齐，导出文本顶格即可）
+    const parts = n.ancestorContinues.slice(1).map((c) => (c ? "│  " : "   "));
+    lines.push(`${parts.join("")}${n.isLast ? "└─ " : "├─ "}${name} (${s.messageCount} msgs)`);
+  });
+  lines.push("", "文件路径（l3 = 纯问答视图；同名 .l1.md 含工具细节和完整推理）:");
+  for (const n of flat) {
+    const s = n.session;
+    const abs = path.join(s.mdDir, `${s.mdBase}.l3.md`);
+    lines.push(`  ${shortenPath(abs)}  ${formatSizeLabel(sizeOf(abs))}  ${s.messageCount} msgs`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * 平台剪贴板复制：pbcopy（macOS）/ clip.exe（WSL）/ wl-copy（Wayland）/ xclip（X11）。
+ * spawnSync 同步喂 stdin，3s 超时；全部不可用返回 error 供选择器 toast。
+ */
+export function copyToClipboard(text: string): { ok: boolean; error?: string } {
+  const cmds: [string, string[]][] = [];
+  if (process.platform === "darwin") {
+    cmds.push(["pbcopy", []]);
+  } else if (process.env.WSL_DISTRO_NAME) {
+    cmds.push(["clip.exe", []]);
+  } else {
+    if (process.env.WAYLAND_DISPLAY) cmds.push(["wl-copy", []]);
+    cmds.push(["xclip", ["-selection", "clipboard"]]);
+  }
+  for (const [cmd, args] of cmds) {
+    try {
+      const r = spawnSync(cmd, args, { input: text, timeout: 3000 });
+      if (r.status === 0) return { ok: true };
+    } catch {
+      /* 命令不存在等，试下一个 */
+    }
+  }
+  return { ok: false, error: "无可用剪贴板命令（尝试 pbcopy/clip.exe/xclip/wl-copy）" };
 }
 
 // ---------- 选择器组件 ----------
@@ -431,6 +502,47 @@ export class GardenSelectorComponent {
     this.requestRender();
   }
 
+  // ----- 子树复制 -----
+
+  private doCopySubtree(): void {
+    if (!this.opts.copyToClipboard) return;
+    const selected = this.flat[this.selectedIndex];
+    if (!selected) return;
+    // 从当前 scope 全量 items 重建树（纯 Map 操作，亚毫秒），按对象同一性定位选中节点；
+    // 搜索态下 flat 是平铺结果，子树仍从全量树取（语义：复制完整后代链）
+    const roots = buildSessionTree(this.items[this.scope] ?? []);
+    const find = (nodes: TreeNode[]): TreeNode | undefined => {
+      for (const n of nodes) {
+        if (n.session === selected.session) return n;
+        const hit = find(n.children);
+        if (hit) return hit;
+      }
+      return undefined;
+    };
+    const node = find(roots);
+    if (!node) return; // 不会发生：selected 来自当前 items
+    const subtree = flattenSessionTree([node]);
+    if (subtree.length > COPY_SUBTREE_MAX) {
+      this.setStatus(`子树过大（${subtree.length}>${COPY_SUBTREE_MAX}），请缩小范围`, "error", 3000);
+      this.requestRender();
+      return;
+    }
+    const text = buildSubtreeCopyText(subtree, (p) => {
+      try {
+        return statSync(p).size;
+      } catch {
+        return null;
+      }
+    });
+    const r = this.opts.copyToClipboard(text);
+    if (r.ok) {
+      this.setStatus(`已复制 ${subtree.length} 个 session 到剪贴板`, "info", 2000);
+    } else {
+      this.setStatus(`复制失败: ${r.error ?? "未知错误"}`, "error", 4000);
+    }
+    this.requestRender();
+  }
+
   // ----- 输入分发 -----
 
   handleInput(data: string): void {
@@ -499,13 +611,16 @@ export class GardenSelectorComponent {
           this.confirmingDelete = selected.session;
         }
       }
-    } else if (this.opts.onNewChild && isCtrlN(data)) {
+    } else if (this.opts.onNewChild && isCtrlLetter(data, "n")) {
       const selected = this.flat[this.selectedIndex];
       if (selected) {
         this.setStatus(null);
         this.opts.onNewChild(selected.session);
         return;
       }
+    } else if (this.opts.copyToClipboard && isCtrlLetter(data, "y")) {
+      this.doCopySubtree();
+      return; // doCopySubtree 自渲染
     } else {
       if (this.searchInput.handleInput(data)) this.refilter();
     }
@@ -549,6 +664,7 @@ export class GardenSelectorComponent {
     }
     const hints = ['Tab scope · re:<正则> · "精确短语"', "Enter 切换 · Esc 取消"];
     if (this.opts.onNewChild) hints.push("Ctrl+N 新建子会话");
+    if (this.opts.copyToClipboard) hints.push("Ctrl+Y 复制子树");
     if (this.opts.renameSession) hints.push("Ctrl+R 改名");
     if (this.opts.deleteSession) hints.push("Ctrl+D 删除");
     return this.theme.fg("muted", truncateToWidth(hints.join(" · "), width, "…"));

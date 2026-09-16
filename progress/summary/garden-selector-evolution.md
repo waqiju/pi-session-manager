@@ -29,6 +29,15 @@
 
 **方案**：自绘轻量选择器替代 pi 组件
 
+### v4 自有快捷键 + 子树复制（0.4.0）
+
+- **修复**：Ctrl+N 新建子会话失效——根因双层：pi git package clone 不自动更新（修复未部署）
+  + pi 0.85.1 把 ctrl+n 改绑 `app.session.toggleNamedFilter`（`app.session.new` 默认键掏空）
+- **`isCtrlLetter` 编码无关匹配**：legacy 控制字符 / Kitty CSI-u / modifyOtherKeys 三编码
+  全覆盖，不借 pi 上游 action 名（上游改绑已坑过一次；自定义 action 进不了 pi 的 KeybindingsManager）
+- **新增 Ctrl+Y 复制子树**：树形（name+msgs）+ l3 路径清单（size+msgs）进剪贴板，
+  供粘贴给其他 AI 作 context；>99 硬拒；平台命令 pbcopy/clip.exe/wl-copy/xclip
+
 ## 当前性能
 
 | 指标 | 内建组件 | 自绘组件 |

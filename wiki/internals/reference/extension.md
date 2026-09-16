@@ -74,10 +74,13 @@ Tab scope（current/all 都缓存，二次切换零开销）、Ctrl+R 改名（`
 同路径 + 立即重转 md 同步新名）、Ctrl+D 删除（trash 优先回退 unlink 删 jsonl；按 frontmatter
 session_id 清全部 md 产物；内存移除，**不做内建那样的全量重载**）。
 新增：Ctrl+N 新建子会话（`ctx.newSession({ parentSession })`；内建选择器已无此键——pi 0.85.1
-把 ctrl+n 默认绑定挪给了 `app.session.toggleNamedFilter`）。匹配走 `isCtrlN`（garden-selector.ts）：
-直接认物理键，legacy `\x0e` / Kitty CSI-u `\x1b[110;5u` / modifyOtherKeys `\x1b[27;5;110~`
-三编码全覆盖（pi-tui 会协商 Kitty flags=7，终端编码不保证是 legacy）；**不借** `kb.matches`
-的 action 名——上游改绑默认键已坑过一次。
+把 ctrl+n 默认绑定挪给了 `app.session.toggleNamedFilter`）、Ctrl+Y 复制子树到剪贴板
+（树形 name+msgs + l3 路径清单附 size，粘贴给 AI 作 context；>99 个 session 硬拒；
+平台命令 pbcopy / clip.exe(WSL) / wl-copy / xclip，`buildSubtreeCopyText` 可直测）。
+自有快捷键匹配走 `isCtrlLetter`（garden-selector.ts）：直接认物理键，legacy 控制字符 /
+Kitty CSI-u / modifyOtherKeys 三编码全覆盖（pi-tui 会协商 Kitty flags=7，终端编码不保证
+是 legacy）；**不借** `kb.matches` 的 action 名——上游改绑默认键已坑过一次，且 pi 的
+KeybindingsManager 不认扩展自定义 action（用户 keybindings.json 无法补绑）。
 裁剪：sort 三模式循环、named-only 过滤、path 显示开关（threaded + 搜索已覆盖）。
 回退：`PI_GARDEN_SELECTOR=builtin` 可切回官方组件（对比/排查用，drvfs 上会卡）。
 
