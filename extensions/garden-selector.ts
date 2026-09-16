@@ -9,15 +9,16 @@
  *
  * 零运行时 pi 依赖（node --test 可直测）：theme / keybindings 由 ctx.ui.custom
  * 工厂注入，只需满足下面的结构化接口（pi 的 Theme / KeybindingsManager 天然满足）。
+ *
+ * 兄弟模块：garden-clipboard.ts（Ctrl+Y 子树复制）、garden-files.ts（删除操作）；
+ * 展示格式化（nodeLabel / formatSizeLabel / formatDate）在 src/format.ts（与 CLI 的
+ * index.md 生成共用）。
  */
 
-import { spawnSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
-import { unlink } from "node:fs/promises";
+import { statSync } from "node:fs";
 import * as os from "node:os";
 import path from "node:path";
-import { indexOutputsBySessionId } from "../src/cli.ts";
-import { GARDEN_LEVELS, pickHighestLevelFile } from "../src/open.ts";
+import { pickHighestLevelFile } from "../src/open.ts";
 import type { SessionListItem } from "../src/session-list.ts";
 import {
   buildSessionTree,
@@ -28,6 +29,7 @@ import {
   type TreeNode,
 } from "../src/session-tree.ts";
 import { truncateToWidth, visibleWidth } from "../src/textwidth.ts";
+import { buildSubtreeCopyText, COPY_SUBTREE_MAX } from "./garden-clipboard.ts";
 
 /** pi-tui 的硬件光标定位标记（IME 用）；内联以避免运行时依赖 pi 包 */
 const CURSOR_MARKER = "\x1b_pi:c\x07";
@@ -204,47 +206,6 @@ export class LineInput {
   }
 }
 
-// ---------- 文件删除（jsonl trash/unlink + garden md 清理） ----------
-
-/** 删除 session jsonl：先试 trash CLI，失败回退 unlink（对齐内建 /resume 删除语义） */
-export async function deleteSessionFile(sessionPath: string): Promise<{ ok: boolean; error?: string }> {
-  const trashArgs = sessionPath.startsWith("-") ? ["--", sessionPath] : [sessionPath];
-  const trashResult = spawnSync("trash", trashArgs, { encoding: "utf-8" });
-  if (trashResult.status === 0 || !existsSync(sessionPath)) return { ok: true };
-  try {
-    await unlink(sessionPath);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-/**
- * 删除该 session 的全部 garden 产物：按 frontmatter session_id 反查（不认文件名），
- * 改名/重编号残留一并清掉，保证下次列表不再出现。
- */
-export async function deleteGardenOutputs(item: SessionListItem): Promise<number> {
-  const files = indexOutputsBySessionId(item.mdDir).get(JSON.stringify(item.id)) ?? [];
-  let removed = 0;
-  for (const f of files) {
-    try {
-      await unlink(path.join(item.mdDir, f));
-      removed++;
-    } catch {
-      /* ignore */
-    }
-  }
-  // 保底：按当前 base 直删（frontmatter 损坏的文件 indexOutputsBySessionId 索引不到）
-  for (const level of GARDEN_LEVELS) {
-    try {
-      await unlink(path.join(item.mdDir, `${item.mdBase}.${level}.md`));
-    } catch {
-      /* ignore */
-    }
-  }
-  return removed;
-}
-
 // ---------- Ctrl+字母 匹配（编码无关） ----------
 
 /** Kitty 协议修饰键里的 Lock 位（Caps Lock + Num Lock），对齐 pi-tui keys.js 的 LOCK_MASK */
@@ -269,111 +230,6 @@ export function isCtrlLetter(data: string, letter: string): boolean {
   if (!m) return false;
   const modifier = m[2] === undefined ? 0 : Number(m[2]) - 1;
   return Number(m[1]) === code && (modifier & ~KITTY_LOCK_MASK) === 4;
-}
-
-// ---------- 子树复制（树 + l3 路径清单，粘贴给 AI 作 context） ----------
-
-/** 子树复制上限（防误把巨型树塞进剪贴板；超出硬拒，不截断） */
-export const COPY_SUBTREE_MAX = 99;
-
-/** 文件大小标签：500B / 8KB / 1.2MB；null（文件不存在等）→ "?" */
-export function formatSizeLabel(bytes: number | null): string {
-  if (bytes === null) return "?";
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
-
-/** YYYY-MM-DD（本地时区）；复制文本用绝对日期——相对时间（"2d"）在粘贴后失真 */
-export function formatDate(d: Date): string {
-  const p = (n: number): string => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-
-/** 复制文本里单个 session 的文件信息（调用方解析：组件 = 最高存在级别 + statSync） */
-export interface SubtreeFileInfo {
-  /** 实际存在的最高级别 md 绝对路径（级别由扩展名标示） */
-  path: string;
-  /** 文件大小（字节）；stat 失败为 null → 显示 "?" */
-  size: number | null;
-}
-
-/** 摘要清洗：控制字符/换行 → 空格，折叠空白 */
-function cleanInline(t: string): string {
-  return t.replace(/[\x00-\x1f\x7f]/g, " ").replace(/\s+/g, " ").trim();
-}
-
-/** 节点标签：name 优先；无名回退首条用户消息摘要（~50 列截断，加引号区别于命名）；皆无 → untitled */
-function nodeLabel(s: SessionListItem): string {
-  const name = cleanInline(s.name ?? "");
-  if (name) return name;
-  const excerpt = cleanInline(s.firstMessage ?? "");
-  return excerpt ? `"${truncateToWidth(excerpt, 50, "…")}"` : "untitled";
-}
-
-/**
- * 子树复制文本（粘贴给其他 AI 作 context）：自解释头部 + 编号树（内联元数据）+ 绝对路径清单。
- * 设计要点：
- * - 目标 AI 零背景可读：头部说清 fork 语义 / 编号对应 / l1-l3 级别规则；
- * - 不读文件即可判断相关性：树行内联 名称/msgs/size/日期；
- * - [n] 编号对齐树节点与路径（模型不擅长数行数）；
- * - 绝对路径（部分读文件工具不展开 ~）；
- * - 日期用绝对值（相对时间在粘贴后失真）。
- * flat = flattenSessionTree([子树根]) 的结果（depth 相对子树根）；只 stat 不读正文。
- */
-export function buildSubtreeCopyText(flat: FlatNode[], resolveFile: (item: SessionListItem) => SubtreeFileInfo): string {
-  const infos = flat.map((n) => resolveFile(n.session));
-  const known = infos.filter((i) => i.size !== null).length;
-  const total = known > 0 ? ` · 合计 ~${formatSizeLabel(infos.reduce((a, i) => a + (i.size ?? 0), 0))}` : "";
-  const root = flat[0].session;
-  const lines: string[] = [
-    `# 会话子树索引（共 ${flat.length} 条对话${total} · 项目 ${root.cwd}）`,
-    "",
-    "一组关联 AI 对话的索引：子会话由父会话 fork（继承其上下文起点）。每条对话的完整内容",
-    "是下方同编号的本地 md 文件，可直接用工具读取。同名 .l1.md（如存在）比 .l3.md 含更多",
-    "工具调用与推理细节。请按名称/消息数/大小/日期选读。",
-    "",
-    "## 树",
-    "",
-  ];
-  flat.forEach((n, i) => {
-    const meta = `${n.session.messageCount} msgs · ${formatSizeLabel(infos[i].size)} · ${formatDate(n.session.modified)}`;
-    if (i === 0) {
-      lines.push(`[1] ${nodeLabel(n.session)} — ${meta}`);
-      return;
-    }
-    // 前缀跳过 ancestorContinues 首槽（子树根一级，屏幕上用于缩进对齐，导出文本顶格即可）
-    const parts = n.ancestorContinues.slice(1).map((c) => (c ? "│  " : "   "));
-    lines.push(`${parts.join("")}${n.isLast ? "└─ " : "├─ "}[${i + 1}] ${nodeLabel(n.session)} — ${meta}`);
-  });
-  lines.push("", "## 文件", "");
-  flat.forEach((n, i) => lines.push(`[${i + 1}] ${infos[i].path}`));
-  return lines.join("\n") + "\n";
-}
-
-/**
- * 平台剪贴板复制：pbcopy（macOS）/ clip.exe（WSL）/ wl-copy（Wayland）/ xclip（X11）。
- * spawnSync 同步喂 stdin，3s 超时；全部不可用返回 error 供选择器 toast。
- */
-export function copyToClipboard(text: string): { ok: boolean; error?: string } {
-  const cmds: [string, string[]][] = [];
-  if (process.platform === "darwin") {
-    cmds.push(["pbcopy", []]);
-  } else if (process.env.WSL_DISTRO_NAME) {
-    cmds.push(["clip.exe", []]);
-  } else {
-    if (process.env.WAYLAND_DISPLAY) cmds.push(["wl-copy", []]);
-    cmds.push(["xclip", ["-selection", "clipboard"]]);
-  }
-  for (const [cmd, args] of cmds) {
-    try {
-      const r = spawnSync(cmd, args, { input: text, timeout: 3000 });
-      if (r.status === 0) return { ok: true };
-    } catch {
-      /* 命令不存在等，试下一个 */
-    }
-  }
-  return { ok: false, error: "无可用剪贴板命令（尝试 pbcopy/clip.exe/xclip/wl-copy）" };
 }
 
 // ---------- 选择器组件 ----------

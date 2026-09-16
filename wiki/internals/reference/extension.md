@@ -35,8 +35,10 @@ ephemeral session（无 session 文件）静默跳过；非常规路径布局（
 |------|------|
 | `/garden` | 快速 session 选择器（等位 /resume，见下节） |
 | `/gardener-output` | 立即转换当前 session，notify 结果 |
-| `/gardener-output all` | 全量回填整个 sessions 树（等价 CLI 目录模式） |
+| `/gardener-output all` | 全量回填整个 sessions 树（等价 CLI 目录模式）；收尾重建有变化目录的 index.md |
+| `/gardener-output index` | 重建当前项目 garden 目录的 index.md（不转换） |
 | `/gardener-open [lN]` | 默认浏览器打开当前 session 的 garden md；默认取存在的最高级别（l3>l2>l1>l0），可指定级别；无产物时先转换再开（指定的级别不在默认导出集时，按需只生成该级别） |
+| `/gardener-open index` | 重建当前项目目录的 index.md 并用默认浏览器打开（打开前总是重建，保证看到最新） |
 
 ## /garden 快速选择器
 
@@ -112,6 +114,10 @@ KeybindingsManager 不认扩展自定义 action（用户 keybindings.json 无法
 - **成功路径静默**：自动触发不 notify；失败仅 notify 一次（相同错误去重，防 live 刷屏）。
 - **不阻塞主流程**：转换是同步 CPU 工作（最大 session ≈0.5s），但所有事件处理器内失败只告警。
 - **与 CLI 无冲突**：同一套增量判断；扩展管当前 session，CLI / `/garden all` 管全量。
+- **index.md 重建边界**：live 自动转换（settle/shutdown 等）**不**重建目录索引——避免每次
+  settle 全目录 frontmatter 扫描；`/gardener-output all` 收尾会重建有变化的目录；
+  `/gardener-open index` 打开前必重建。因此编辑器里直接浏览到的 index.md 可能滞后于最新会话，
+  但打开路径永远最新（生成逻辑与格式见 src/index-page.ts 头注）。
 - **live 编号避让**：live 转换是单 session 组，`planBaseNames` 永远给当日 001；撞车（同 slug
   兄弟已占用）时递增序号避让，**永不覆盖别的 session 的文件**；序号短暂不准由下次
   `/gardener-output all`（或 CLI）归位——全量路径整组编号，不需要避让。

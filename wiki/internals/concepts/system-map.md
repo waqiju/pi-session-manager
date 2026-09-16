@@ -38,7 +38,8 @@ garden 是单向的格式转换器：pi 的 session jsonl → 四级 markdown �
                      ▼
 ┌────────────────────────────────────────────────────────────┐
 │ ~/.pi/agent/garden/--<cwd 转义>--/<日期>-<序号>-<slug>.     │
-│   {l0,l1,l2,l3}.md；目录结构镜像 sessions                    │
+│   {l0,l1,l2,l3}.md + index.md（fork 森林索引）；目录结构    │
+│   镜像 sessions                                            │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -48,8 +49,12 @@ garden 是单向的格式转换器：pi 的 session jsonl → 四级 markdown �
 |------|------|
 | `extensions/garden.ts` | pi 扩展适配层：转换事件接线、`/garden` 快速选择器接线、`/gardener-output`、`/gardener-open`；逻辑全部委托 src/ |
 | `extensions/garden-selector.ts` | `/garden` 自绘选择器组件：零 realpathSync（内建组件在 drvfs 上卡 ~22s 的根因绕过）；零运行时 pi 依赖，node --test 可直测 |
-| `src/session-list.ts` | `/garden` 选择器数据源：只读 garden md（frontmatter + 正文），不读 jsonl（见 wiki/internals/reference/extension.md） |
-| `src/session-tree.ts` | 选择器纯逻辑：fork 树（按 jsonl 文件名配对，零 syscall）+ 搜索（fuzzy / 短语 / 正则） |
+| `extensions/garden-clipboard.ts` | 选择器 Ctrl+Y 子树复制：自解释文本 + 平台剪贴板命令 |
+| `extensions/garden-files.ts` | 选择器删除操作：jsonl（trash 优先）+ garden md 产物清理 |
+| `src/session-list.ts` | `/garden` 选择器与 index.md 的数据源：只读 garden md（frontmatter + 正文），不读 jsonl（见 wiki/internals/reference/extension.md） |
+| `src/session-tree.ts` | 选择器/索引纯逻辑：fork 树（按 jsonl 文件名配对，零 syscall）+ 搜索（fuzzy / 短语 / 正则） |
+| `src/index-page.ts` | garden 目录索引 index.md 生成：fork 森林 + 相对链接嵌套列表；CLI 与扩展命令共用 |
+| `src/format.ts` | 会话展示格式化（nodeLabel / formatSizeLabel / formatDate），index.md 与子树复制共用 |
 | `src/textwidth.ts` | 终端文本宽度工具（ANSI 零宽 / CJK 宽字符 / 按列截断），供选择器渲染 |
 | `src/open.ts` | gardener-open：级别选择、平台检测、打开命令 |
 | `src/cli.ts` | 参数、目录扫描、命名计划、旧文件清理、增量判断、写盘 |

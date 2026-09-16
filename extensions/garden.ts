@@ -17,8 +17,10 @@
  *                        数据源 = garden md 产物（不再读 jsonl）；自绘组件零 realpathSync，
  *                        drvfs 上 <3s 就绪（内建组件因 canonicalizePath 卡 ~22s，见
  *                        extensions/garden-selector.ts 头注）
- *   /gardener-output   → 转换当前 session（all = 全量回填 sessions 树）
- *   /gardener-open [lN]→ 默认浏览器打开当前 session 的 garden md（默认最高存在级别）
+ *   /gardener-output   → 转换当前 session（all = 全量回填 sessions 树；
+ *                        index = 重建当前项目目录的 index.md）
+ *   /gardener-open [lN]→ 默认浏览器打开当前 session 的 garden md（默认最高存在级别；
+ *                        index = 重建并打开当前项目目录的 index.md）
  *
  * 配置（env）：
  *   PI_GARDEN=0                     完全停用本扩展
@@ -39,8 +41,11 @@ import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { avoidForeignBase, collectJobs, convertGroup, DEFAULT_LEVELS, parseLevels, pathsForFile, prepareGroup, processFile, type LevelName } from "../src/cli.ts";
 import { GARDEN_LEVELS, isGardenLevel, openFile, pickHighestLevelFile, type GardenLevel } from "../src/open.ts";
+import { generateDirIndex, INDEX_FILE_NAME } from "../src/index-page.ts";
 import { gardenDirForSessionDir, gardenRootForSessionDir, listAllSessions, listProjectSessions } from "../src/session-list.ts";
-import { GardenSelectorComponent, copyToClipboard, deleteGardenOutputs, deleteSessionFile } from "./garden-selector.ts";
+import { copyToClipboard } from "./garden-clipboard.ts";
+import { deleteGardenOutputs, deleteSessionFile } from "./garden-files.ts";
+import { GardenSelectorComponent } from "./garden-selector.ts";
 
 export interface GardenConfig {
   enabled: boolean;
@@ -144,9 +149,14 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("gardener-output", {
-    description: "转换当前 session 到 garden（/gardener-output all = 全量回填 sessions 树）",
+    description: "转换当前 session 到 garden（all = 全量回填 sessions 树；index = 重建当前目录 index.md）",
     handler: async (args, ctx) => {
-      if (args.trim() === "all") {
+      const arg = args.trim();
+      if (arg === "index") {
+        await rebuildCurrentDirIndex(ctx);
+        return;
+      }
+      if (arg === "all") {
         const file = ctx.sessionManager.getSessionFile();
         const sessionsDir = file ? path.dirname(path.dirname(file)) : path.join(process.env.HOME ?? "", ".pi", "agent", "sessions");
         if (!existsSync(sessionsDir)) {
@@ -166,19 +176,28 @@ export default function (pi: ExtensionAPI) {
         let updated = 0;
         let failed = 0;
         let removed = 0;
+        const dirtySubs = new Set<string>();
         for (const [sub, groupJobs] of groups) {
           const { results, removed: r } = convertGroup(groupJobs, path.join(defaultOut, sub), cfg.levels, () => {
             failed++;
           });
           removed += r;
+          if (r > 0 || results.some((x) => x.written.length)) dirtySubs.add(sub);
           for (const { written, error } of results) {
             if (error) failed++;
             else if (written.length) updated++;
           }
         }
+        // 索引收尾：有变化的目录重建 index.md（与 CLI 目录模式同一语义）
+        let indexCount = 0;
+        for (const sub of dirtySubs) {
+          try {
+            if (await generateDirIndex(path.join(defaultOut, sub))) indexCount++;
+          } catch { /* 索引失败不影响转换结果 */ }
+        }
         notify(
           ctx,
-          `garden all: ${jobs.length} 个 session，${updated} 更新${removed ? `，清理 ${removed} 个旧文件` : ""}${failed ? `，${failed} 失败` : ""} → ${defaultOut}`,
+          `garden all: ${jobs.length} 个 session，${updated} 更新${removed ? `，清理 ${removed} 个旧文件` : ""}${indexCount ? `，index × ${indexCount}` : ""}${failed ? `，${failed} 失败` : ""} → ${defaultOut}`,
           failed ? "warning" : "info",
         );
         return;
@@ -188,10 +207,29 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  /** 重建当前 session 所属 garden 项目目录的 index.md 并 notify；返回生成结果（无产物 → null） */
+  async function rebuildCurrentDirIndex(ctx: ExtensionContext) {
+    const dir = gardenDirForSessionDir(ctx.sessionManager.getSessionDir());
+    const r = await generateDirIndex(dir);
+    notify(
+      ctx,
+      r ? `garden index: ${r.sessions} 条对话 · ${r.roots} 棵树 → ${r.file}${r.changed ? "" : "（已是最新）"}` : `garden index: ${dir} 暂无会话产物`,
+      r ? "info" : "warning",
+    );
+    return r;
+  }
+
   pi.registerCommand("gardener-open", {
-    description: `默认浏览器打开当前 session 的 garden md（默认最高存在级别；可用 ${GARDEN_LEVELS.join("/")} 指定）`,
+    description: `默认浏览器打开当前 session 的 garden md（默认最高存在级别；可用 ${GARDEN_LEVELS.join("/")} 指定；index = 重建并打开目录索引）`,
     handler: async (args, ctx) => {
       const levelArg = args.trim();
+      if (levelArg === "index") {
+        const r = await rebuildCurrentDirIndex(ctx);
+        if (!r) return;
+        const o = await openFile(r.file, process.env);
+        notify(ctx, o.ok ? `gardener-open: 已打开 ${INDEX_FILE_NAME}` : `gardener-open 失败: ${o.detail}`, o.ok ? "info" : "warning");
+        return;
+      }
       if (levelArg && !isGardenLevel(levelArg)) {
         notify(ctx, `gardener-open: 未知级别 "${levelArg}"（可选 ${GARDEN_LEVELS.join("/")}）`, "warning");
         return;

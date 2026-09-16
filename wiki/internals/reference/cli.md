@@ -12,6 +12,7 @@ garden ... -o <输出目录>   # 自定义输出目录
 garden ... --levels l0,l1  # 指定导出级别（默认 l1,l3）
 garden --sync [path]       # 同步：删除孤儿 + 多余级别 + 增量转换
 garden --sync --dry-run    # 同步演练：只打印将删除的文件
+garden --index [path]      # 只重建各 garden 项目目录的 index.md（不转换）
 garden -h                  # 帮助
 ```
 
@@ -23,6 +24,7 @@ garden -h                  # 帮助
 | `-o, --output <dir>` | 输出根目录 | sessions 的同级 `garden/` |
 | `--levels <列表>` | 导出级别，逗号分隔（子集 `l0/l1/l2/l3`） | 环境变量 `PI_GARDEN_LEVELS`，再缺省 `l1,l3` |
 | `--sync` | 同步模式：扫描 garden 目录，删除孤儿文件（session 已删）+ 多余级别文件（不在 `--levels` 集中），然后增量转换 | — |
+| `--index` | 只重建 index.md：输入解析同转换（sessions 路径 → garden 目录），不做转换；单文件输入只重建对应项目目录 | — |
 | `--dry-run` | 与 `--sync` 搭配，只打印删除计划不实际操作 | — |
 | `-h, --help` | 打印用法 | — |
 
@@ -43,6 +45,10 @@ garden -h                  # 帮助
 - **增量**：输出 mtime ≥ 源 mtime 且 frontmatter `version` == 当前 `GARDEN_VERSION`
   才跳过；两个条件任一不满足即重新生成
 - 单个文件失败不影响其余（打印 `✗` 并继续）
+- **目录索引（index.md）**：每个 garden 项目目录一份 fork 森林索引（生成逻辑见
+  src/index-page.ts）。重建时机：目录模式/`--sync` 收尾（有写入/清理或缺索引的目录；
+  `--sync` 为全量对账，覆盖所有现有项目目录）、`--index` 显式重建。内容无变化时跳过写盘
+  （避免 mtime 抖动）。`--dry-run` 不动索引
 - **同步模式（`--sync`）**：在增量转换前，先递归扫描 garden 全目录（含子目录），
   读取每个 `.lN.md` 的 frontmatter `session_id`，与 sessions 中的实际 session 比对：
   - `session_id` 无对应 jsonl → 孤儿文件，删除

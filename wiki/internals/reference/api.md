@@ -62,6 +62,24 @@
 | `processFile(prepared, outDir, levels?) => { written, skipped }` | 渲染并写出单个 session 的级别文件（含增量判断）；`levels` 缺省 `DEFAULT_LEVELS` |
 | `DEFAULT_LEVELS` / `parseLevels(raw)` | 默认导出级别 `["l1","l3"]`；解析 `"l1,l3"` 形式（非法项忽略，全非法 → `undefined` 回退默认） |
 | `isUpToDate(outPath, srcMtime) => boolean` | mtime + 版本标记双重判断 |
+| `existingGardenDirs(outRoot) => string[]` | 现有 garden 项目目录：outRoot 下非隐藏子目录 + outRoot 自身（顶层直放 md 的非标准布局） |
+
+## index-page.ts（garden 目录索引 index.md 生成）
+
+| 导出 | 说明 |
+|------|------|
+| `generateDirIndex(dir) => Promise<DirIndexResult \| null>` | 重建一个项目目录的 index.md：frontmatter-only 扫描（不读正文）→ fork 森林；无会话 → null；内容无变化跳过写盘（`changed=false`）；链接 = 存在的最高级别 md 的相对路径 |
+| `buildIndexPage(items, resolveFile) => string` | 索引页文本（纯函数）：标题 + 统计 + 说明块 + 嵌套列表（缩进 = fork 层级，树间空行）；label 转义 `[`/`]`，href 包 `<>`（文件名可能含括号/空格） |
+| `INDEX_FILE_NAME` | `"index.md"`；不匹配 `*.lN.md`，列表加载与孤儿清理天然忽略它 |
+
+## format.ts（会话列表展示格式化，index.md 与子树复制共用）
+
+| 导出 | 说明 |
+|------|------|
+| `nodeLabel(item) => string` | name 优先；无名回退首条消息摘要（~50 列截断、加引号）；皆无 → `untitled` |
+| `formatSizeLabel(bytes \| null) => string` | `500B` / `8KB` / `1.2MB`；null → `?` |
+| `formatDate(d) => string` | `YYYY-MM-DD`（本地时区；导出文本不用相对时间，落盘后失真） |
+| `cleanInline(t) => string` | 控制字符/换行 → 空格，折叠空白 |
 
 ## session-list.ts（快速 session 列表，供 `/garden` 选择器；数据源 = garden md，不读 jsonl）
 
@@ -99,8 +117,24 @@
 |------|------|
 | `GardenSelectorComponent` | `ctx.ui.custom` 组件：render/handleInput/invalidate/dispose + focused；构造即开始加载 current scope |
 | `LineInput` | 极简行输入（code-point 安全；插入/退格/移动/ctrl+a/e/u/k/w；粘贴换行变空格） |
-| `deleteSessionFile(path)` / `deleteGardenOutputs(item)` | 删除 jsonl（trash 优先回退 unlink）+ 按 frontmatter session_id 清全部 md 产物 |
+| `isCtrlLetter(data, letter)` | Ctrl+字母判定：legacy 控制字符 / Kitty CSI-u / modifyOtherKeys 三编码 |
+| `formatAge(date) => string` | 相对时间（now/m/h/d/w/mo/y，选择器行内用） |
 | `SelectorTheme` / `SelectorKeybindings` | 结构化注入接口（pi 的 Theme / KeybindingsManager 天然满足；组件零运行时 pi 依赖） |
+
+## garden-clipboard.ts（/garden 选择器 Ctrl+Y 子树复制，extensions/ 下）
+
+| 导出 | 说明 |
+|------|------|
+| `buildSubtreeCopyText(flat, resolveFile) => string` | 子树复制文本：自解释头部 + 编号树 + 绝对路径清单（粘贴给其他 AI 作 context） |
+| `copyToClipboard(text) => { ok, error? }` | pbcopy / clip.exe(WSL) / wl-copy / xclip；3s 超时 |
+| `COPY_SUBTREE_MAX` | 99；子树超过硬拒（防巨型树塞剪贴板） |
+
+## garden-files.ts（/garden 选择器删除操作，extensions/ 下）
+
+| 导出 | 说明 |
+|------|------|
+| `deleteSessionFile(path)` | 删除 jsonl（trash 优先回退 unlink） |
+| `deleteGardenOutputs(item)` | 按 frontmatter session_id 清全部 md 产物（改名/重编号残留一并清） |
 
 ## open.ts（gardener-open 打开器）
 

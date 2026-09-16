@@ -30,8 +30,16 @@ pi install https://github.com/waqiju/pi-session-manager   # git package
 扩展内命令：`/garden`（快速 session 选择器，等位 /resume：fork 树/搜索/改名/删除；
 自绘组件零 realpathSync + 数据源只读 garden md 产物，drvfs 上秒开——内建组件因
 canonicalizePath 会卡 ~22s；`PI_GARDEN_SELECTOR=builtin` 可回退官方组件）、
-`/gardener-output`（转换当前 session，`all` 全量回填）、`/gardener-open [lN]`（浏览器打开 md）。
+`/gardener-output`（转换当前 session，`all` 全量回填，`index` 重建目录索引）、
+`/gardener-open [lN]`（浏览器打开 md；`index` 重建并打开目录索引）。
 触发点与 `PI_GARDEN*` 环境变量配置见 [extension 参考](wiki/internals/reference/extension.md)。
+
+## 目录索引（index.md）
+
+每个 garden 项目目录维护一份 `index.md`：fork 森林（多棵会话树，按最近活跃降序）
++ 嵌套列表（缩进 = fork 层级），每行内联名称/消息数/大小/日期，相对路径链接可直接点击。
+重建时机：CLI 转换/`--sync` 收尾（有变化或缺索引的目录）、`garden --index`、
+`/gardener-output index`、`/gardener-open index`（打开前总是重建，保证看到最新）。
 
 ## 四级输出
 

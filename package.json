@@ -13,7 +13,7 @@
   },
   "scripts": {
     "garden": "node src/cli.ts",
-    "test": "node --test test/render.test.ts test/truncate.test.ts test/naming.test.ts test/cli.test.ts test/extension.test.ts test/session-list.test.ts test/session-tree.test.ts test/garden-selector.test.ts test/textwidth.test.ts test/open.test.ts"
+    "test": "node --test test/render.test.ts test/truncate.test.ts test/naming.test.ts test/cli.test.ts test/extension.test.ts test/session-list.test.ts test/session-tree.test.ts test/garden-selector.test.ts test/index-page.test.ts test/textwidth.test.ts test/open.test.ts"
   },
   "pi": {
     "extensions": ["./extensions/garden.ts"]

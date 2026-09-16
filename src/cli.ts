@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { generateDirIndex, INDEX_FILE_NAME } from "./index-page.ts";
 import { extractNamingInfo, planBaseNames } from "./naming.ts";
 import { parseSessionFile } from "./parser.ts";
 import type { ParsedSession } from "./parser.ts";
@@ -25,6 +26,7 @@ const USAGE = `garden — 把 pi sessions (.jsonl) 转成四级 markdown (l0/l1/
   garden ... --levels l0,l1  指定导出级别（默认 l1,l3；也可用 env PI_GARDEN_LEVELS，flag 优先）
   garden --sync [path]       同步：删除已删 session 的孤儿产物 + 多余级别，然后增量转换
   garden --sync --dry-run    同步演练：只打印将删除的文件，不实际操作
+  garden --index [path]      只重建各 garden 项目目录的 index.md（输入解析同转换，不做转换）
 
 命名: <本地日期>-<序号>-<slug>.<level>.md（slug = 会话名，无则 untitled）
 增量: 源文件 mtime 比输出新才重新生成。
@@ -346,6 +348,50 @@ export function avoidForeignBase(outDir: string, base: string, sessionId: string
   return candidate;
 }
 
+/** 目录内是否有会话产物（*.lN.md）；--index 的顶层直放布局判定用 */
+function dirHasMdFiles(dir: string): boolean {
+  try {
+    return readdirSync(dir).some((f) => OUT_FILE_RE.test(f));
+  } catch {
+    return false;
+  }
+}
+
+/** 现有 garden 项目目录清单：outRoot 下非隐藏子目录 + outRoot 自身（顶层直放 md 的非标准布局） */
+export function existingGardenDirs(outRoot: string): string[] {
+  const dirs: string[] = [];
+  let dirents: Dirent[];
+  try {
+    dirents = readdirSync(outRoot, { withFileTypes: true });
+  } catch {
+    return dirs;
+  }
+  for (const d of dirents) {
+    if (d.isDirectory() && !d.name.startsWith(".")) dirs.push(path.join(outRoot, d.name));
+  }
+  if (dirHasMdFiles(outRoot)) dirs.push(outRoot);
+  return dirs;
+}
+
+/** 重建各目录的 index.md 并打印；无会话产物的目录静默跳过。返回实际生成数 */
+async function refreshIndexes(dirs: string[], outRoot: string): Promise<number> {
+  let done = 0;
+  for (const dir of dirs) {
+    let r;
+    try {
+      r = await generateDirIndex(dir);
+    } catch (e) {
+      console.error(`  ✗ index.md 生成失败 ${dir}: ${(e as Error).message}`);
+      continue;
+    }
+    if (!r) continue;
+    done++;
+    const rel = path.relative(outRoot, dir);
+    console.log(`  ✓ ${rel ? `${rel}/` : ""}index.md（${r.sessions} 条对话 · ${r.roots} 棵树${r.changed ? "" : "，已是最新"}）`);
+  }
+  return done;
+}
+
 /** convertGroup 单条结果 */
 export interface ConvertGroupItem {
   p: Prepared;
@@ -382,9 +428,9 @@ export function convertGroup(
   return { results, removed, prepared };
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const { values, positionals } = parseArgs({
-    options: { output: { type: "string", short: "o" }, levels: { type: "string" }, sync: { type: "boolean" }, "dry-run": { type: "boolean" }, help: { type: "boolean", short: "h" } },
+    options: { output: { type: "string", short: "o" }, levels: { type: "string" }, sync: { type: "boolean" }, index: { type: "boolean" }, "dry-run": { type: "boolean" }, help: { type: "boolean", short: "h" } },
     allowPositionals: true,
   });
   if (values.help) {
@@ -401,10 +447,22 @@ function main(): void {
   const levels = parseLevels(values.levels) ?? parseLevels(process.env.PI_GARDEN_LEVELS) ?? DEFAULT_LEVELS;
   const dryRun = !!values["dry-run"];
 
+  if (values.index) {
+    if (values.sync) { console.error("--index 与 --sync 不能同用"); process.exit(1); }
+    // 索引对象是 garden 侧产物：单文件 → 对应项目目录；目录 → 全部现有项目目录
+    const dirs = target ? [path.join(outRoot, path.basename(path.dirname(target)))] : existingGardenDirs(outRoot);
+    console.log(`garden --index: ${dirs.length} 个目录 → ${outRoot}`);
+    const n = await refreshIndexes(dirs, outRoot);
+    console.log(`完成: ${n} 个 index.md${n < dirs.length ? `，${dirs.length - n} 个目录无会话产物` : ""}`);
+    return;
+  }
+
   if (values.sync) {
     if (target) { console.error("--sync 不支持单文件模式，请使用目录路径"); process.exit(1); }
     console.log(`garden sync: ${jobs.length} 个 session → ${outRoot}（级别 ${levels.join(",")}）${dryRun ? " (dry-run)" : ""}`);
     const { updated, fresh, failed, removed } = runSync(input, outRoot, levels, dryRun);
+    // 同步是全量对账：重建所有现有项目目录的索引（含 jsonl 已删的归档目录；dry-run 不动盘）
+    if (!dryRun) await refreshIndexes(existingGardenDirs(outRoot), outRoot);
     console.log(`完成: ${updated} 更新, ${fresh} 已是最新${removed ? `, ${dryRun ? "将删除" : "清理"} ${removed} 个文件` : ""}${failed ? `, ${failed} 失败` : ""}`);
     if (failed) process.exit(1);
     return;
@@ -424,6 +482,7 @@ function main(): void {
   let fresh = 0;
   let failed = 0;
   let removed = 0;
+  const dirtySubs = new Set<string>(); // 有写入/清理的目录 → 收尾重建 index.md
   for (const [sub, groupJobs] of groups) {
     const outDir = path.join(outRoot, sub);
     const { results, removed: r } = convertGroup(
@@ -437,6 +496,7 @@ function main(): void {
       target ? (p) => p.job.src === target : undefined, // 单文件模式：兄弟只参与编号
     );
     removed += r;
+    if (r > 0 || results.some((x) => x.written.length)) dirtySubs.add(sub);
     for (const { p, written, error } of results) {
       const rel = path.join(sub, path.basename(p.job.src));
       if (error) {
@@ -450,10 +510,18 @@ function main(): void {
       }
     }
   }
+  // 索引收尾：有变化的目录重建；缺 index.md 的目录（首次升级/新目录）也补建
+  const indexDirs = [...groups.keys()]
+    .filter((sub) => dirtySubs.has(sub) || !existsSync(path.join(outRoot, sub, INDEX_FILE_NAME)))
+    .map((sub) => path.join(outRoot, sub));
+  await refreshIndexes(indexDirs, outRoot);
   console.log(`完成: ${updated} 更新, ${fresh} 已是最新${removed ? `, 清理 ${removed} 个旧文件` : ""}${failed ? `, ${failed} 失败` : ""}`);
   if (failed) process.exit(1);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  main();
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
 }

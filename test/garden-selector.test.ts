@@ -3,16 +3,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import {
-  buildSubtreeCopyText,
-  COPY_SUBTREE_MAX,
-  formatAge,
-  formatDate,
-  formatSizeLabel,
-  GardenSelectorComponent,
-  isCtrlLetter,
-  LineInput,
-} from "../extensions/garden-selector.ts";
+import { buildSubtreeCopyText, COPY_SUBTREE_MAX } from "../extensions/garden-clipboard.ts";
+import { formatAge, GardenSelectorComponent, isCtrlLetter, LineInput } from "../extensions/garden-selector.ts";
+import { formatDate, formatSizeLabel } from "../src/format.ts";
 import type { SessionListItem } from "../src/session-list.ts";
 import { buildSessionTree, flattenSessionTree } from "../src/session-tree.ts";
 import { stripAnsi, visibleWidth } from "../src/textwidth.ts";
