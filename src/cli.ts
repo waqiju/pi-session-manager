@@ -198,31 +198,6 @@ export function removeStaleOutputs(index: Map<string, string[]>, outDir: string,
   return removed;
 }
 
-/** 递归扫描 garden 目录（含一层子目录），按 frontmatter session_id 索引全部 .lN.md 文件（key = session_id JSON 字面量） */
-export function indexOutputsRecursive(gardenRoot: string): Map<string, string[]> {
-  const index = new Map<string, string[]>();
-  function scanDir(dir: string) {
-    let entries: Dirent[];
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) { scanDir(full); continue; }
-      if (!e.isFile() || !OUT_FILE_RE.test(e.name)) continue;
-      const m = readHead(full).match(/^session_id: ("(?:[^"\\\\]|\\\\.)*")$/m);
-      if (!m) continue;
-      const list = index.get(m[1]) ?? [];
-      list.push(path.relative(gardenRoot, full));
-      index.set(m[1], list);
-    }
-  }
-  scanDir(gardenRoot);
-  return index;
-}
-
 /** --sync 清理：删除已删 session 的孤儿文件 + 不在允许级别集中的多余级别文件。dryRun 时只打印不删 */
 export function syncCleanup(
   index: Map<string, string[]>,
