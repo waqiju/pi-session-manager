@@ -88,9 +88,9 @@ export function buildIndexPage(items: SessionListItem[], resolveFile: (item: Ses
   ];
   flat.forEach((n, i) => {
     const meta = `${n.session.messageCount} msgs · ${formatDateShort(n.session.modified)}`;
-    const icon = hasChildren.has(n.session) ? "🗂️" : "📄";
+    const icon = n.depth === 0 && hasChildren.has(n.session) ? "🗂️" : "📄";
     // href 加 <>：文件名可能含空格/括号（裸 ( ) 会截断 markdown 链接目标）
-    const row = `- ${icon} [${escapeLinkLabel(nodeLabel(n.session))}](<${infos[i].href}>) \`${meta}\``;
+    const row = `- ${icon} [${escapeLinkLabel(nodeLabel(n.session))}](<${infos[i].href}>)  \`${meta}\``;
     if (n.depth === 0 && lines[lines.length - 1] !== "") lines.push(""); // 树间空行（渲染上拉开间距）
     lines.push(`${"  ".repeat(n.depth)}${row}`);
   });

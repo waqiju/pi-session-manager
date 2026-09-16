@@ -75,10 +75,11 @@ test("buildIndexPage: 头部统计 + fork 森林嵌套列表 + emoji + 元数据
   const iRoot = lines.findIndex((l) => l.includes("[根会话]"));
   const iChild = lines.findIndex((l) => l.includes("[子会话]"));
   assert.ok(iOther > 0 && iRoot > iOther && iChild > iRoot, `顺序: other=${iOther} root=${iRoot} child=${iChild}`);
-  // 🗂️ 有子会话 / 📄 单条（无子的根也是 📄）；元数据 chip 不含文件大小；当年日期 MM-DD
-  assert.equal(lines[iOther], "- 📄 [另一棵](<./2026-09-16-001-另.l3.md>) `10 msgs · 09-16`");
-  assert.match(lines[iRoot], /^- 🗂️ \[根会话\]\(<\.\//);
-  assert.equal(lines[iChild], "  - 📄 [子会话](<./2026-09-15-001-子.l3.md>) `50 msgs · 09-15`");
+  // 🗂️ 根节点有子；📄 其余（包括有子的 fork）；元数据 chip 不含文件大小；当年日期 MM-DD
+  const GS = "\u2007".repeat(2); // figure spaces，非普通空格（markdown 不压缩，raw 文本可见）
+  assert.equal(lines[iOther], `- 📄 [另一棵](<./2026-09-16-001-另.l3.md>)${GS}\`10 msgs · 09-16\``);
+  assert.ok(lines[iRoot].startsWith(`- 🗂️ [根会话](<./2026-09-14-001-根.l3.md>)${GS}`), lines[iRoot]);
+  assert.equal(lines[iChild], `  - 📄 [子会话](<./2026-09-15-001-子.l3.md>)${GS}\`50 msgs · 09-15\``);
   // 两棵树之间有空行
   assert.equal(lines[iRoot - 1], "");
 });
