@@ -23,6 +23,8 @@ const USAGE = `garden — 把 pi sessions (.jsonl) 转成四级 markdown (l0/l1/
   garden <xxx.jsonl>         单文件模式（编号仍参考同目录全部 session）
   garden ... -o <输出目录>   自定义输出目录
   garden ... --levels l0,l1  指定导出级别（默认 l1,l3；也可用 env PI_GARDEN_LEVELS，flag 优先）
+  garden --sync [path]       同步：删除已删 session 的孤儿产物 + 多余级别，然后增量转换
+  garden --sync --dry-run    同步演练：只打印将删除的文件，不实际操作
 
 命名: <本地日期>-<序号>-<slug>.<level>.md（slug = 会话名，无则 untitled）
 增量: 源文件 mtime 比输出新才重新生成。
@@ -196,6 +198,117 @@ export function removeStaleOutputs(index: Map<string, string[]>, outDir: string,
   return removed;
 }
 
+/** 递归扫描 garden 目录（含一层子目录），按 frontmatter session_id 索引全部 .lN.md 文件（key = session_id JSON 字面量） */
+export function indexOutputsRecursive(gardenRoot: string): Map<string, string[]> {
+  const index = new Map<string, string[]>();
+  function scanDir(dir: string) {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) { scanDir(full); continue; }
+      if (!e.isFile() || !OUT_FILE_RE.test(e.name)) continue;
+      const m = readHead(full).match(/^session_id: ("(?:[^"\\\\]|\\\\.)*")$/m);
+      if (!m) continue;
+      const list = index.get(m[1]) ?? [];
+      list.push(path.relative(gardenRoot, full));
+      index.set(m[1], list);
+    }
+  }
+  scanDir(gardenRoot);
+  return index;
+}
+
+/** --sync 清理：删除已删 session 的孤儿文件 + 不在允许级别集中的多余级别文件。dryRun 时只打印不删 */
+export function syncCleanup(
+  index: Map<string, string[]>,
+  validIds: Set<string>,
+  allowedLevels: Set<string>,
+  gardenRoot: string,
+  dryRun: boolean,
+): number {
+  let count = 0;
+  for (const [key, files] of index) {
+    const sessionId = JSON.parse(key) as string;
+    const isOrphan = !validIds.has(sessionId);
+    for (const rel of files) {
+      const m = rel.match(/\.l(\d+)\.md$/);
+      if (!isOrphan && m && allowedLevels.has(`l${m[1]}`)) continue;
+      const label = isOrphan ? "orphan" : "stale level";
+      console.log(`  ${dryRun ? "(dry-run) " : ""}删除 ${label}: ${rel}`);
+      if (!dryRun) {
+        try { unlinkSync(path.join(gardenRoot, rel)); } catch { /* ignore */ }
+      }
+      count++;
+    }
+  }
+  return count;
+}
+
+/** --sync 流程：扫描索引 → 清理孤儿 & 多余级别 → 增量转换 */
+export function runSync(
+  input: string,
+  outRoot: string,
+  levels: readonly LevelName[],
+  dryRun: boolean,
+): { updated: number; fresh: number; failed: number; removed: number } {
+  const { jobs } = collectJobs(input);
+  const levelSet = new Set<string>(levels);
+
+  // 1. 收集所有 session_id + 正常增量转换
+  const groups = new Map<string, Job[]>();
+  for (const job of jobs) {
+    const list = groups.get(job.sub) ?? [];
+    list.push(job);
+    groups.set(job.sub, list);
+  }
+  const validIds = new Set<string>();
+  const fullIndex = new Map<string, string[]>(); // syncCleanup 用：合并所有子目录的索引副本
+  let updated = 0, fresh = 0, failed = 0;
+  for (const [sub, groupJobs] of groups) {
+    const outDir = path.join(outRoot, sub);
+    const prepared = prepareGroup(groupJobs, (job) => {
+      failed++;
+      console.error(`  ✗ ${path.join(sub, path.basename(job.src))}: 读取/解析失败`);
+    });
+    for (const p of prepared) validIds.add(p.id);
+    const staleIndex = indexOutputsBySessionId(outDir);
+    const syncIdx = new Map(staleIndex); // syncCleanup 用独立副本（removeStaleOutputs 会 delete key）
+    for (const p of prepared) {
+      const rel = path.join(sub, path.basename(p.job.src));
+      try {
+        removeStaleOutputs(staleIndex, outDir, p.id, p.base);
+        const { written } = processFile(p, outDir, levels);
+        if (written.length) { updated++; console.log(`  ✓ ${rel} → ${p.base} (${written.map((l) => `.${l}.md`).join(" ")})`); }
+        else fresh++;
+      } catch (e) {
+        failed++;
+        console.error(`  ✗ ${rel}: ${(e as Error).message}`);
+      }
+    }
+    for (const [k, v] of syncIdx) {
+      const list = fullIndex.get(k) ?? [];
+      for (const f of v) list.push(path.join(sub, f));
+      fullIndex.set(k, list);
+    }
+  }
+
+  // 2. 扫描 garden 全目录 → 清理孤儿 & 多余级别
+  let removed = 0;
+  if (existsSync(outRoot)) {
+    removed = syncCleanup(fullIndex, validIds, levelSet, outRoot, dryRun);
+    if (!removed) console.log("garden sync: garden 已是同步状态");
+  } else {
+    console.log("garden sync: garden 目录不存在，仅增量转换");
+  }
+
+  return { updated, fresh, failed, removed };
+}
+
 export function processFile(p: Prepared, outDir: string, levels: readonly LevelName[] = DEFAULT_LEVELS): { written: string[]; skipped: string[] } {
   const written: string[] = [];
   const skipped: string[] = [];
@@ -215,7 +328,7 @@ export function processFile(p: Prepared, outDir: string, levels: readonly LevelN
 
 function main(): void {
   const { values, positionals } = parseArgs({
-    options: { output: { type: "string", short: "o" }, levels: { type: "string" }, help: { type: "boolean", short: "h" } },
+    options: { output: { type: "string", short: "o" }, levels: { type: "string" }, sync: { type: "boolean" }, "dry-run": { type: "boolean" }, help: { type: "boolean", short: "h" } },
     allowPositionals: true,
   });
   if (values.help) {
@@ -230,6 +343,17 @@ function main(): void {
   const { jobs, target, defaultOut } = collectJobs(input);
   const outRoot = path.resolve(values.output ?? defaultOut);
   const levels = parseLevels(values.levels) ?? parseLevels(process.env.PI_GARDEN_LEVELS) ?? DEFAULT_LEVELS;
+  const dryRun = !!values["dry-run"];
+
+  if (values.sync) {
+    if (target) { console.error("--sync 不支持单文件模式，请使用目录路径"); process.exit(1); }
+    console.log(`garden sync: ${jobs.length} 个 session → ${outRoot}（级别 ${levels.join(",")}）${dryRun ? " (dry-run)" : ""}`);
+    const { updated, fresh, failed, removed } = runSync(input, outRoot, levels, dryRun);
+    console.log(`完成: ${updated} 更新, ${fresh} 已是最新${removed ? `, ${dryRun ? "将删除" : "清理"} ${removed} 个文件` : ""}${failed ? `, ${failed} 失败` : ""}`);
+    if (failed) process.exit(1);
+    return;
+  }
+
   console.log(`garden: ${target ? 1 : jobs.length} 个 session → ${outRoot}（级别 ${levels.join(",")}）`);
 
   // 编号是同目录内的全局属性 → 按子目录分组，组内统一解析 + 命名计划

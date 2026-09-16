@@ -103,6 +103,49 @@ test("CLI: --levels 与 PI_GARDEN_LEVELS 控制导出级别（flag > env > 默�
   assert.ok(fallback.l1.has && fallback.l3.has && !fallback.l0.has, "非法值应回退默认");
 });
 
+test("CLI: --sync 删除已删 session 的孤儿文件 + 多余级别", () => {
+  const { root, sessionsDir } = setup();
+  const gardenDir = path.join(root, "garden", "--tmp-proj--");
+  try {
+    // 先跑一次正常转换，生成 l1/l3
+    execFileSync(process.execPath, [CLI, sessionsDir], { encoding: "utf8" });
+    const sessionGlob = "2026-09-14-001-garden_开发会话";
+
+    // 模拟旧配置残留：手写 l0 文件
+    writeFileSync(path.join(gardenDir, `${sessionGlob}.l0.md`), `---\nlevel: "l0"\nsession_id: "test-session-uuid"\n---\nl0 内容\n`);
+    // 模拟已删 session 的孤儿文件（伪造 session_id）
+    writeFileSync(path.join(gardenDir, "2026-09-14-999-orphan.l1.md"), `---\nlevel: "l1"\nsession_id: "deadbeef-uuid"\n---\n孤儿\n`);
+
+    // --sync 应清理 l0（stale level）+ orphan（孤儿）
+    const out = execFileSync(process.execPath, [CLI, sessionsDir, "--sync"], { encoding: "utf8" });
+    assert.ok(out.includes("删除 stale level: --tmp-proj--/" + `${sessionGlob}.l0.md`), out);
+    assert.ok(out.includes("删除 orphan: --tmp-proj--/2026-09-14-999-orphan.l1.md"), out);
+    assert.ok(!existsSync(path.join(gardenDir, `${sessionGlob}.l0.md`)), "stale level 应被删除");
+    assert.ok(!existsSync(path.join(gardenDir, "2026-09-14-999-orphan.l1.md")), "孤儿应被删除");
+    assert.ok(existsSync(path.join(gardenDir, `${sessionGlob}.l1.md`)), "有效 l1 应保留");
+    assert.ok(existsSync(path.join(gardenDir, `${sessionGlob}.l3.md`)), "有效 l3 应保留");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI: --sync --dry-run 只打印不删除", () => {
+  const { root, sessionsDir } = setup();
+  const gardenDir = path.join(root, "garden", "--tmp-proj--");
+  try {
+    execFileSync(process.execPath, [CLI, sessionsDir], { encoding: "utf8" });
+    writeFileSync(path.join(gardenDir, "2026-09-14-001-garden_开发会话.l0.md"), `---\nlevel: "l0"\nsession_id: "test-session-uuid"\n---\n`);
+    writeFileSync(path.join(gardenDir, "orphan.l1.md"), `---\nlevel: "l1"\nsession_id: "zzz"\n---\n`);
+
+    const out = execFileSync(process.execPath, [CLI, sessionsDir, "--sync", "--dry-run"], { encoding: "utf8" });
+    assert.ok(out.includes("(dry-run) 删除"), out);
+    assert.ok(existsSync(path.join(gardenDir, "orphan.l1.md")), "dry-run 不应实际删除");
+    assert.ok(existsSync(path.join(gardenDir, "2026-09-14-001-garden_开发会话.l0.md")), "dry-run 不应删除 l0");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("CLI: 单文件模式 + -o", () => {
   const { root, sessionsDir } = setup();
   try {

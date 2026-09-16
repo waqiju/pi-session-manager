@@ -10,6 +10,8 @@ garden <sessions目录>      # 输出到其同级 garden/
 garden <xxx.jsonl>         # 单文件模式
 garden ... -o <输出目录>   # 自定义输出目录
 garden ... --levels l0,l1  # 指定导出级别（默认 l1,l3）
+garden --sync [path]       # 同步：删除孤儿 + 多余级别 + 增量转换
+garden --sync --dry-run    # 同步演练：只打印将删除的文件
 garden -h                  # 帮助
 ```
 
@@ -20,6 +22,8 @@ garden -h                  # 帮助
 | `[path]`（位置参数） | sessions 目录或单个 .jsonl | `~/.pi/agent/sessions` |
 | `-o, --output <dir>` | 输出根目录 | sessions 的同级 `garden/` |
 | `--levels <列表>` | 导出级别，逗号分隔（子集 `l0/l1/l2/l3`） | 环境变量 `PI_GARDEN_LEVELS`，再缺省 `l1,l3` |
+| `--sync` | 同步模式：扫描 garden 目录，删除孤儿文件（session 已删）+ 多余级别文件（不在 `--levels` 集中），然后增量转换 | — |
+| `--dry-run` | 与 `--sync` 搭配，只打印删除计划不实际操作 | — |
 | `-h, --help` | 打印用法 | — |
 
 优先级：`--levels` > `PI_GARDEN_LEVELS` > 默认 `l1,l3`；非法级别忽略，全部非法回退默认。
@@ -39,6 +43,13 @@ garden -h                  # 帮助
 - **增量**：输出 mtime ≥ 源 mtime 且 frontmatter `version` == 当前 `GARDEN_VERSION`
   才跳过；两个条件任一不满足即重新生成
 - 单个文件失败不影响其余（打印 `✗` 并继续）
+- **同步模式（`--sync`）**：在增量转换前，先递归扫描 garden 全目录（含子目录），
+  读取每个 `.lN.md` 的 frontmatter `session_id`，与 sessions 中的实际 session 比对：
+  - `session_id` 无对应 jsonl → 孤儿文件，删除
+  - `session_id` 存在但级别不在当前 `--levels` 集 → 多余级别，删除
+  - `--dry-run` 时只打印 `删除 orphan/stale level: <path>`，不实际 `unlink`
+  - 不带 `--sync` 时的常规模式只清理同 session_id 内改名/重编号产生的旧文件，
+    不处理孤儿和多余级别
 
 ## 输出摘要
 
