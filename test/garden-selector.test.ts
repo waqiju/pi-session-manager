@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { GardenSelectorComponent, LineInput, formatAge } from "../extensions/garden-selector.ts";
+import { GardenSelectorComponent, LineInput, formatAge, isCtrlN } from "../extensions/garden-selector.ts";
 import type { SessionListItem } from "../src/session-list.ts";
 import { stripAnsi } from "../src/textwidth.ts";
 
@@ -13,7 +13,8 @@ const stubTheme = {
   bold: (t: string) => t,
 };
 
-/** 最小按键映射（对齐 pi 默认：enter/escape/up/down/tab/ctrl+r/ctrl+d） */
+/** 最小按键映射（对齐 pi 0.85.1 默认：enter/escape/up/down/tab/ctrl+r/ctrl+d；
+ *  app.session.new 已空无默认绑定，Ctrl+N 由组件 isCtrlN 自理，不经此 mock） */
 const KEY_MAP: Record<string, string> = {
   "\r": "tui.select.confirm",
   "\x1b": "tui.select.cancel",
@@ -24,7 +25,6 @@ const KEY_MAP: Record<string, string> = {
   "\t": "tui.input.tab",
   "\x12": "app.session.rename",
   "\x04": "app.session.delete",
-  "\x0e": "app.session.new",
 };
 const stubKeybindings = {
   matches: (data: string, action: string) => KEY_MAP[data] === action,
@@ -242,22 +242,42 @@ test("选择器: 删除流程（ctrl+d → enter 确认 → 列表移除）；�
   assert.ok(!plain(h.c).includes("要删除的"), "删除后从列表移除");
 });
 
-test("选择器: Ctrl+N 新建子会话（onNewChild 回调）", async () => {
+test("isCtrlN: 三种终端编码匹配；修饰键不符/无修饰不匹配", () => {
+  assert.ok(isCtrlN("\x0e"), "legacy SO 控制字符");
+  assert.ok(isCtrlN("\x1b[110;5u"), "Kitty CSI-u");
+  assert.ok(isCtrlN("\x1b[110;5:1u"), "CSI-u 带 event type");
+  assert.ok(isCtrlN("\x1b[110::110;5u"), "CSI-u 带 base layout key");
+  assert.ok(isCtrlN("\x1b[110;69u"), "ctrl + Caps Lock 位（64+4+1）");
+  assert.ok(isCtrlN("\x1b[27;5;110~"), "xterm modifyOtherKeys");
+  assert.ok(!isCtrlN("n"));
+  assert.ok(!isCtrlN("\x1b[110u"), "无修饰 = 纯 n");
+  assert.ok(!isCtrlN("\x1b[110;2u"), "shift+n");
+  assert.ok(!isCtrlN("\x1b[110;3u"), "alt+n");
+  assert.ok(!isCtrlN("\x1b[98;5u"), "ctrl+b 别的键");
+});
+
+test("选择器: Ctrl+N 新建子会话（onNewChild 回调，三种编码）", async () => {
   const a = makeItem({ mdBase: "aaa", name: "父会话", modified: new Date("2026-09-14T01:00:00Z") });
   const b = makeItem({ mdBase: "bbb", name: "子会话", modified: new Date("2026-09-14T02:00:00Z") });
+  // legacy \x0e / Kitty CSI-u / modifyOtherKeys 三种编码都应触发
+  for (const data of ["\x0e", "\x1b[110;5u", "\x1b[27;5;110~"]) {
+    const h = harness([a, b]);
+    await flush();
+    // b 最新排第一 → Ctrl+N 创建其子会话
+    h.c.handleInput(data);
+    assert.deepEqual(h.newChildren, [b.path], `编码 ${JSON.stringify(data)}`);
+  }
   const h = harness([a, b]);
   await flush();
-  // b 最新排第一 → Ctrl+N 创建其子会话
-  h.c.handleInput("\x0e");
-  assert.deepEqual(h.newChildren, [b.path]);
   assert.ok(plain(h.c).includes("Ctrl+N 新建子会话"), "hint 常驻");
 
   // 不传 onNewChild 时 Ctrl+N 不消费，回退到搜索输入
   const h2 = harness([a, b], undefined, { onNewChild: undefined });
   await flush();
   h2.c.handleInput("\x0e");
+  h2.c.handleInput("\x1b[110;5u");
   assert.equal(h2.newChildren.length, 0);
-  // \x0e 是 Shift Out（不可打印）：LineInput 不识别 → 不崩即可
+  // \x0e 是 Shift Out（不可打印）、CSI-u 以 ESC 开头：LineInput 不识别 → 不崩即可
 });
 
 test("选择器: 空目录提示回填命令；加载失败进状态栏", async () => {

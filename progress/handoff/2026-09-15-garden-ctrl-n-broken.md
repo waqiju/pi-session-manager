@@ -1,7 +1,21 @@
-# Handoff: garden selector Ctrl+N（新建子会话）失效
+# Handoff: garden selector Ctrl+N（新建子会话）失效 —— 已解决
 
 - 日期：2026-09-15
 - 项目：garden（pi-session-manager）
+- 状态：**已解决**（2026-09-15 二轮调查）
+- 根因（双层）：
+  1. **修复未部署**：pi 以 git package 加载本仓库（`~/.pi/agent/git/github.com/waqiju/pi-session-manager`），
+     clone 停在 `88a2f59`，`a3e7317` 虽已推送 origin/main 但 pi 包管理器不自动 pull —— 用户跑的还是
+     `kb.matches(data, "app.session.new")`（pi 0.85.1 该 action 默认绑定为空 → 永远 false）。
+  2. **`\x0e` 匹配本身不稳**：pi-tui 启动协商 Kitty keyboard protocol（flags=7）/ modifyOtherKeys，
+     Ctrl+N 可能编码为 `\x1b[110;5u` / `\x1b[27;5;110~` 而非 legacy `\x0e`。
+- 修复：`isCtrlN(data)` 编码无关匹配（三编码全覆盖，不借上游 action 名）+ `pi update` 刷新 clone。
+- 运维记录：git package 推送后必须 `pi update` 才生效，见 wiki/internals/reference/extension.md 安装节。
+
+---
+
+## 初始 handoff 存档
+
 - 状态：**未解决**，初始修复（`data === "\x0e"` 替换 `kb.matches`）无效
 - 相关提交：`a3e7317`（已推送，需继续调查）
 

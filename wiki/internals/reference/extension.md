@@ -11,6 +11,11 @@ pi 扩展形态：会话生命周期内自动把**当前 session** 转成四级 
 | git package | `pi install https://github.com/waqiju/pi-session-manager` | 稳定后分发 |
 | 临时试用 | `pi -e /path/to/pi-session-manager` | 单次运行 |
 
+> **git package 不自动更新**：pi 把 git 包 clone 到 `~/.pi/agent/git/<host>/<org>/<repo>` 后不再同步。
+> 推送新修复后必须 `pi update https://github.com/waqiju/pi-session-manager`（或裸 `pi update` 更新全部）
+> 刷新 clone 并重启 pi，否则一直跑旧代码。（2026-09-15 实例：Ctrl+N 修复已推送但“无效”，
+> 查得 clone 落后 4 个提交。）
+
 ## 触发点
 
 | pi 事件 | 作用 |
@@ -67,6 +72,11 @@ node --test 可直测（test/garden-selector.test.ts）。
 Tab scope（current/all 都缓存，二次切换零开销）、Ctrl+R 改名（`SessionManager.appendSessionInfo`
 同路径 + 立即重转 md 同步新名）、Ctrl+D 删除（trash 优先回退 unlink 删 jsonl；按 frontmatter
 session_id 清全部 md 产物；内存移除，**不做内建那样的全量重载**）。
+新增：Ctrl+N 新建子会话（`ctx.newSession({ parentSession })`；内建选择器已无此键——pi 0.85.1
+把 ctrl+n 默认绑定挪给了 `app.session.toggleNamedFilter`）。匹配走 `isCtrlN`（garden-selector.ts）：
+直接认物理键，legacy `\x0e` / Kitty CSI-u `\x1b[110;5u` / modifyOtherKeys `\x1b[27;5;110~`
+三编码全覆盖（pi-tui 会协商 Kitty flags=7，终端编码不保证是 legacy）；**不借** `kb.matches`
+的 action 名——上游改绑默认键已坑过一次。
 裁剪：sort 三模式循环、named-only 过滤、path 显示开关（threaded + 搜索已覆盖）。
 回退：`PI_GARDEN_SELECTOR=builtin` 可切回官方组件（对比/排查用，drvfs 上会卡）。
 

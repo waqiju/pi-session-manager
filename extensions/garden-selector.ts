@@ -229,6 +229,30 @@ export async function deleteGardenOutputs(item: SessionListItem): Promise<number
   return removed;
 }
 
+// ---------- Ctrl+N 匹配（编码无关） ----------
+
+/** Kitty 协议修饰键里的 Lock 位（Caps Lock + Num Lock），对齐 pi-tui keys.js 的 LOCK_MASK */
+const KITTY_LOCK_MASK = 64 + 128;
+
+/**
+ * Ctrl+N 判定，与 pi-tui matchesKey(data, "ctrl+n") 等价但内联，保持本文件零 pi 依赖。
+ * 覆盖三种终端编码：
+ *   legacy          → "\x0e"（SO 控制字符）
+ *   Kitty CSI-u     → "\x1b[110;5u"（可带 alternate keys / event type 段；pi-tui 协商 flags=7）
+ *   modifyOtherKeys → "\x1b[27;5;110~"（Kitty 不可用时的回退）
+ * 不走 kb.matches("app.session.*")：pi 0.85.1 把 ctrl+n 默认绑定从 app.session.new 挪给
+ * toggleNamedFilter 已证明上游会改绑；garden 的 Ctrl+N 是自己的功能，直接认物理键。
+ */
+export function isCtrlN(data: string): boolean {
+  if (data === "\x0e") return true;
+  if (data === "\x1b[27;5;110~") return true;
+  // CSI-u：\x1b[<codepoint>[:shifted[:base]]][;<mod>[:event]]u；mod 值 = 修饰位 + 1，ctrl = 4
+  const m = data.match(/^\x1b\[(\d+)(?::\d*)?(?::\d+)?(?:;(\d+))?(?::\d+)?u$/);
+  if (!m) return false;
+  const modifier = m[2] === undefined ? 0 : Number(m[2]) - 1;
+  return Number(m[1]) === 110 && (modifier & ~KITTY_LOCK_MASK) === 4;
+}
+
 // ---------- 选择器组件 ----------
 
 type Scope = "current" | "all";
@@ -475,7 +499,7 @@ export class GardenSelectorComponent {
           this.confirmingDelete = selected.session;
         }
       }
-    } else if (this.opts.onNewChild && data === "\x0e") {  // Ctrl+N
+    } else if (this.opts.onNewChild && isCtrlN(data)) {
       const selected = this.flat[this.selectedIndex];
       if (selected) {
         this.setStatus(null);
