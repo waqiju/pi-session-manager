@@ -54,6 +54,7 @@ garden 是单向的格式转换器：pi 的 session jsonl → 四级 markdown �
 | `src/session-list.ts` | `/garden` 选择器与 index.md 的数据源：只读 garden md（frontmatter + 正文），不读 jsonl（见 wiki/internals/reference/extension.md） |
 | `src/session-tree.ts` | 选择器/索引纯逻辑：fork 树（按 jsonl 文件名配对，零 syscall）+ 搜索（fuzzy / 短语 / 正则） |
 | `src/index-page.ts` | garden 目录索引 index.md 生成：fork 森林 + 相对链接嵌套列表；CLI 与扩展命令共用 |
+| `src/reverse-sync.ts` | 反向同步：人工编辑的 index.md（换父缩进 / to-delete / to-archive）对账并应用回 sessions；见 [reverse-sync](reverse-sync.md) |
 | `src/format.ts` | 会话展示格式化（nodeLabel / formatSizeLabel / formatDate），index.md 与子树复制共用 |
 | `src/textwidth.ts` | 终端文本宽度工具（ANSI 零宽 / CJK 宽字符 / 按列截断），供选择器渲染 |
 | `src/open.ts` | gardener-open：级别选择、平台检测、打开命令 |
@@ -88,4 +89,6 @@ garden 是单向的格式转换器：pi 的 session jsonl → 四级 markdown �
 - 扩展只转换**当前会话**的文件；全量回填用 CLI 或 `/gardener-output all`。
 - `/garden` 选择器以 garden md 为唯一数据源：未转换的 session 不出现在列表中
   （升级后跑一次 `/gardener-output all` 回填；旧版产物缺 `source` 字段的同样跳过）。
+- 反向同步（Ctrl+G）只对 current scope 生效（index.md 是项目级文件）；label 文本改动
+  不生效（身份只认 href）。
 - 未来方向（未实现）：watch 模式（脱离 pi 生命周期的独立守护）。

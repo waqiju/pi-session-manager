@@ -43,6 +43,11 @@ canonicalizePath 会卡 ~22s；`PI_GARDEN_SELECTOR=builtin` 可回退官方组�
 重建时机：CLI 转换/`--sync` 收尾（有变化或缺索引的目录）、`garden --index`、
 `/gardener-output index`、`/gardener-open index`（打开前总是重建，保证看到最新）。
 
+index.md 同时是**反向同步**的编辑入口：人工调整缩进（换父）或在行尾加 `to-delete` /
+`to-archive` 标记后，在 `/garden` 选择器按 `Ctrl+G` 应用回 sessions（先一一对账，
+确认条汇总后执行；归档挪入 `1_archived/` 并保留树路径身份）。语义与安全前提见
+[reverse-sync](wiki/internals/concepts/reverse-sync.md)。
+
 ## 四级输出
 
 | 级别 | 定位 |

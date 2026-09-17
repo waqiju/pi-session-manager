@@ -492,3 +492,105 @@ test("formatAge: 各量级", () => {
   assert.equal(formatAge(new Date(now - 60 * 86400_000)), "2mo");
   assert.equal(formatAge(new Date(now - 400 * 86400_000)), "1y");
 });
+
+// ---------- Ctrl+G 反向同步 ----------
+
+test("选择器: Ctrl+G 反向同步（prepare → 确认条汇总 → Enter apply → 重载列表）", async () => {
+  const a = makeItem({ mdBase: "aaa", name: "甲" });
+  let prepared = 0;
+  let applied = 0;
+  const h = harness([a], undefined, {
+    reverseSync: {
+      prepare: async () => {
+        prepared++;
+        return { ok: true, preview: { reparents: 1, deletes: 2, archives: 3, detached: 1 } };
+      },
+      apply: async () => {
+        applied++;
+        return { ok: true, message: "反向同步: 1 换父 · 2 删除 · 3 归档" };
+      },
+    },
+  });
+  await flush();
+  assert.ok(plain(h.c, 200).includes("Ctrl+G 反向同步"), "hint 常驻（宽行不截断）");
+  const loadsBefore = h.loadCounts.current;
+  h.c.handleInput("\x07"); // ctrl+g legacy
+  await flush();
+  assert.equal(prepared, 1);
+  const bar = plain(h.c);
+  assert.ok(bar.includes("1 换父") && bar.includes("2 删除") && bar.includes("3 归档") && bar.includes("1 脱钩为根"), bar);
+  // 确认态吞键：普通输入不进入搜索框
+  h.c.handleInput("x");
+  assert.ok(!plain(h.c).includes("❯ x"), "确认态吞键");
+  h.c.handleInput("\r");
+  await flush();
+  assert.equal(applied, 1);
+  assert.ok(h.loadCounts.current > loadsBefore, "apply 后重载列表");
+  assert.ok(plain(h.c).includes("反向同步: 1 换父"), plain(h.c));
+});
+
+test("选择器: Ctrl+G —— 全零不进确认条；Esc 取消不 apply；all scope 拒绝；prepare 失败进状态栏", async () => {
+  const a = makeItem({ mdBase: "aaa", name: "甲" });
+
+  // 全零 → 直接提示，不进确认条
+  let applied = 0;
+  const h0 = harness([a], undefined, {
+    reverseSync: {
+      prepare: async () => ({ ok: true, preview: { reparents: 0, deletes: 0, archives: 0, detached: 0 } }),
+      apply: async () => {
+        applied++;
+        return { ok: true, message: "x" };
+      },
+    },
+  });
+  await flush();
+  h0.c.handleInput("\x07");
+  await flush();
+  assert.ok(plain(h0.c).includes("无需同步"), plain(h0.c));
+  assert.equal(applied, 0);
+
+  // Esc 取消 → 不 apply
+  const h1 = harness([a], undefined, {
+    reverseSync: {
+      prepare: async () => ({ ok: true, preview: { reparents: 1, deletes: 0, archives: 0, detached: 0 } }),
+      apply: async () => {
+        applied++;
+        return { ok: true, message: "x" };
+      },
+    },
+  });
+  await flush();
+  h1.c.handleInput("\x1b[103;5u"); // ctrl+g Kitty CSI-u
+  await flush();
+  assert.ok(plain(h1.c).includes("应用反向同步"), "确认条出现");
+  h1.c.handleInput("\x1b");
+  await flush();
+  assert.equal(applied, 0, "Esc 取消不 apply");
+  assert.ok(!plain(h1.c).includes("应用反向同步"), "确认条消失");
+
+  // all scope 拒绝
+  const h2 = harness([a], undefined, {
+    reverseSync: {
+      prepare: async () => ({ ok: true, preview: { reparents: 1, deletes: 0, archives: 0, detached: 0 } }),
+      apply: async () => ({ ok: true, message: "x" }),
+    },
+  });
+  await flush();
+  h2.c.handleInput("\t"); // 切到 all
+  await flush();
+  h2.c.handleInput("\x07");
+  await flush();
+  assert.ok(plain(h2.c).includes("仅支持 Current"), plain(h2.c));
+
+  // prepare 失败（对账不一致）→ 错误进状态栏
+  const h3 = harness([a], undefined, {
+    reverseSync: {
+      prepare: async () => ({ ok: false, error: "index.md 与 sessions 不一致：缺少 2 条" }),
+      apply: async () => ({ ok: true, message: "x" }),
+    },
+  });
+  await flush();
+  h3.c.handleInput("\x07");
+  await flush();
+  assert.ok(plain(h3.c).includes("不一致"), plain(h3.c));
+});

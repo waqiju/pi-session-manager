@@ -13,7 +13,8 @@
  *
  * 二、命令：
  *   /garden            → 快速 session 选择器（等位 /resume：fork 树/搜索/删除/重命名/
- *                        新建子会话/子树复制到剪贴板。
+ *                        新建子会话/子树复制到剪贴板/Ctrl+G 反向同步人工编辑的
+ *                        index.md：换父 + to-delete + to-archive，见 src/reverse-sync.ts）。
  *                        数据源 = garden md 产物（不再读 jsonl）；自绘组件零 realpathSync，
  *                        drvfs 上 <3s 就绪（内建组件因 canonicalizePath 卡 ~22s，见
  *                        extensions/garden-selector.ts 头注）
@@ -36,12 +37,20 @@
  * 注意：factory 只在会话加载时运行；不在此处起 timer / watcher（pi 扩展约束）。
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { avoidForeignBase, collectJobs, convertGroup, DEFAULT_LEVELS, parseLevels, pathsForFile, prepareGroup, processFile, type LevelName } from "../src/cli.ts";
 import { GARDEN_LEVELS, isGardenLevel, openFile, pickHighestLevelFile, type GardenLevel } from "../src/open.ts";
 import { generateDirIndex, INDEX_FILE_NAME } from "../src/index-page.ts";
+import {
+  archiveSessionFile,
+  parseIndexRows,
+  planPreview,
+  planReverseSync,
+  rewriteSessionParent,
+  type ReverseSyncPlan,
+} from "../src/reverse-sync.ts";
 import { gardenDirForSessionDir, gardenRootForSessionDir, listAllSessions, listProjectSessions } from "../src/session-list.ts";
 import { copyToClipboard } from "./garden-clipboard.ts";
 import { deleteGardenOutputs, deleteSessionFile } from "./garden-files.ts";
@@ -286,6 +295,90 @@ export default function (pi: ExtensionAPI) {
         listAllSessions(gardenRoot, { onProgress, fullText: cfg.selectorFullText });
 
       let picked: string | null;
+      // Ctrl+G 反向同步：prepare/apply 分离——prepare 对账并给确认条汇总，
+      // plan 暂存闭包，选择器 Enter 确认后 apply 消费（单次使用）
+      let pendingPlan: ReverseSyncPlan | null = null;
+      const reverseSync = {
+        prepare: async () => {
+          pendingPlan = null;
+          const indexFile = path.join(gardenDir, INDEX_FILE_NAME);
+          if (!existsSync(indexFile)) {
+            return { ok: false as const, error: "无 index.md，请先 /gardener-output index 生成" };
+          }
+          let rows;
+          try {
+            rows = parseIndexRows(readFileSync(indexFile, "utf-8"));
+          } catch (e) {
+            return { ok: false as const, error: `index.md 读取失败: ${(e as Error).message}` };
+          }
+          const items = await listProjectSessions(gardenDir, { fullText: false });
+          const r = planReverseSync(rows, items, { protectedPaths: new Set(currentFile ? [currentFile] : []) });
+          if (!r.ok) return { ok: false as const, error: r.error };
+          pendingPlan = r.plan;
+          return { ok: true as const, preview: planPreview(r.plan) };
+        },
+        apply: async () => {
+          const plan = pendingPlan;
+          pendingPlan = null;
+          if (!plan) return { ok: false as const, error: "没有待执行的同步计划，请重新按 Ctrl+G" };
+          const errors: string[] = [];
+          let deleted = 0;
+          let archived = 0;
+          let reparented = 0;
+          for (const item of plan.deletes) {
+            const r = await deleteSessionFile(item.path);
+            if (r.ok) {
+              await deleteGardenOutputs(item);
+              deleted++;
+            } else {
+              errors.push(`删除 ${item.mdBase}: ${r.error ?? "未知错误"}`);
+            }
+          }
+          for (const op of plan.archives) {
+            const r = archiveSessionFile(op.item.path, op.item.id, op.treePath);
+            if (r.ok) {
+              await deleteGardenOutputs(op.item);
+              archived++;
+            } else {
+              errors.push(`归档 ${op.item.mdBase}: ${r.error ?? "未知错误"}`);
+            }
+          }
+          for (const op of plan.reparents) {
+            const r = rewriteSessionParent(op.item.path, op.item.id, op.newParentPath);
+            if (!r.ok) {
+              errors.push(`换父 ${op.item.mdBase}: ${r.error ?? "未知错误"}`);
+              continue;
+            }
+            reparented++;
+            // md frontmatter 的 parent_session 是 index/选择器的树数据源，必须立即重转，
+            // 否则下次重建 index 又显示旧树（jsonl 重写后 mtime 变新 → isUpToDate 判过期）
+            try {
+              convertSessionFile(op.item.path, cfg.levels);
+            } catch (e) {
+              errors.push(`重转 ${op.item.mdBase}: ${(e as Error).message}`);
+            }
+          }
+          // 收尾重建索引（固化新树、消费掉标记）；全删光时无内容可生成 → 移除索引
+          let indexNote = "";
+          try {
+            const remaining = await listProjectSessions(gardenDir, { fullText: false });
+            if (remaining.length === 0) {
+              unlinkSync(path.join(gardenDir, INDEX_FILE_NAME));
+              indexNote = "，index.md 已清空移除";
+            } else {
+              await generateDirIndex(gardenDir);
+              indexNote = "，index 已重建";
+            }
+          } catch (e) {
+            errors.push(`index 重建: ${(e as Error).message}`);
+          }
+          const message = `反向同步: ${reparented} 换父 · ${deleted} 删除 · ${archived} 归档${indexNote}`;
+          if (errors.length) {
+            return { ok: false as const, error: `${message}；${errors.length} 项失败: ${errors[0]}${errors.length > 1 ? " 等" : ""}` };
+          }
+          return { ok: true as const, message };
+        },
+      };
       if ((process.env.PI_GARDEN_SELECTOR ?? "").trim() === "builtin") {
         // 回退：pi 官方组件（内部 canonicalizePath 在 drvfs 上会卡 ~22s，仅用于对比/排查）。
         // 动态 import：仅在此分支才加载 pi 包（保持本文件可被零依赖测试）
@@ -321,6 +414,7 @@ export default function (pi: ExtensionAPI) {
                 void ctx.newSession({ parentSession: item.path });
               },
               copyToClipboard,
+              reverseSync,
               renameSession: async (item, name) => {
                 // 与内建 /resume 同一实现路径；随后立即重转，让 md frontmatter/文件名同步新名
                 const { SessionManager } = (await import("@earendil-works/pi-coding-agent")) as any;

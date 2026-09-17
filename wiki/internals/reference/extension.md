@@ -80,7 +80,11 @@ session_id 清全部 md 产物；内存移除，**不做内建那样的全量重
 （粘贴给其他 AI 作 context，格式为目标 AI 优化：自解释头部说清 fork 语义与级别规则；
 树行内联 `[n] 名称 — msgs · size · 日期`，无名节点回退首条消息摘要；同编号绝对路径清单
 ——不用 `~`，部分读文件工具不展开。每个 session 取实际存在的最高级别 md；>99 硬拒；
-平台命令 pbcopy / clip.exe(WSL) / wl-copy / xclip，`buildSubtreeCopyText` 可直测）。
+平台命令 pbcopy / clip.exe(WSL) / wl-copy / xclip，`buildSubtreeCopyText` 可直测）、
+**Ctrl+G 反向同步**：把人工编辑过的 index.md（调缩进换父 / 行尾 `to-delete` / `to-archive`）
+应用回 sessions——先一一对账（数量 + id），确认条汇总 N 换父 · M 删除 · K 归档后执行；
+归档挪 jsonl 到 `1_archived/`（header 加 archivedTreePath/archivedAt，pi 容忍额外字段）。
+语义与安全前提见 [reverse-sync](../concepts/reverse-sync.md)。
 自有快捷键匹配走 `isCtrlLetter`（garden-selector.ts）：直接认物理键，legacy 控制字符 /
 Kitty CSI-u / modifyOtherKeys 三编码全覆盖（pi-tui 会协商 Kitty flags=7，终端编码不保证
 是 legacy）；**不借** `kb.matches` 的 action 名——上游改绑默认键已坑过一次，且 pi 的

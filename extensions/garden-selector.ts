@@ -19,6 +19,7 @@ import { statSync } from "node:fs";
 import * as os from "node:os";
 import path from "node:path";
 import { pickHighestLevelFile } from "../src/open.ts";
+import type { ReverseSyncPreview } from "../src/reverse-sync.ts";
 import type { SessionListItem } from "../src/session-list.ts";
 import {
   buildSessionTree,
@@ -64,6 +65,15 @@ export interface SelectorOptions {
   copyToClipboard?: (text: string) => { ok: boolean; error?: string };
   /** 删除（jsonl + garden md 产物）；返回 ok/error */
   deleteSession?: (item: SessionListItem) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Ctrl+G 反向同步：把人工编辑过的 index.md（换父缩进 / to-delete / to-archive）
+   * 应用回 sessions（src/reverse-sync.ts）。仅 current scope 有意义（index.md 是项目级文件）。
+   * prepare 做一一对账并返回确认条汇总；apply 执行并返回人读简报。
+   */
+  reverseSync?: {
+    prepare: () => Promise<{ ok: true; preview: ReverseSyncPreview } | { ok: false; error: string }>;
+    apply: () => Promise<{ ok: true; message: string } | { ok: false; error: string }>;
+  };
   /** 终端高度（可选，用于自适应 maxVisible）；不传则回退 process.stdout.rows / 24 */
   getTerminalHeight?: () => number;
   maxVisible?: number;
@@ -254,6 +264,7 @@ export class GardenSelectorComponent {
   private renameInput = new LineInput();
   private renameTarget: SessionListItem | null = null;
   private confirmingDelete: SessionListItem | null = null;
+  private confirmingReverseSync: ReverseSyncPreview | null = null;
   private flat: FlatNode[] = [];
   private selectedIndex = 0;
   private statusMessage: { type: "info" | "error"; message: string } | null = null;
@@ -455,6 +466,45 @@ export class GardenSelectorComponent {
     this.requestRender();
   }
 
+  // ----- 反向同步（index.md → sessions） -----
+
+  private async doPrepareReverseSync(): Promise<void> {
+    if (!this.opts.reverseSync) return;
+    if (this.scope !== "current") {
+      this.setStatus("反向同步仅支持 Current 作用域（index.md 是项目级索引）", "error", 3000);
+      this.requestRender();
+      return;
+    }
+    this.setStatus("正在校验 index.md …");
+    this.requestRender();
+    const r = await this.opts.reverseSync.prepare();
+    if (!r.ok) {
+      this.setStatus(r.error, "error", 8000);
+    } else if (!r.preview.reparents && !r.preview.deletes && !r.preview.archives) {
+      this.setStatus("index.md 无需同步（无换父 / 无标记）", "info", 3000);
+    } else {
+      this.setStatus(null);
+      this.confirmingReverseSync = r.preview;
+    }
+    this.requestRender();
+  }
+
+  private async doApplyReverseSync(): Promise<void> {
+    if (!this.opts.reverseSync) return;
+    this.confirmingReverseSync = null;
+    this.setStatus("反向同步应用中…");
+    this.requestRender();
+    const r = await this.opts.reverseSync.apply();
+    if (r.ok) {
+      this.setStatus(r.message, "info", 5000);
+    } else {
+      this.setStatus(r.error, "error", 10000);
+    }
+    // 无论成败都重载：数据源是 garden md，删除/归档清产物、换父重转后需刷新
+    void this.loadScope("current");
+    this.requestRender();
+  }
+
   // ----- 输入分发 -----
 
   handleInput(data: string): void {
@@ -467,6 +517,16 @@ export class GardenSelectorComponent {
         void this.doDelete(target);
       } else if (kb.matches(data, "tui.select.cancel")) {
         this.confirmingDelete = null;
+      }
+      this.requestRender();
+      return;
+    }
+    // 反向同步确认态：同上吞键
+    if (this.confirmingReverseSync) {
+      if (kb.matches(data, "tui.select.confirm")) {
+        void this.doApplyReverseSync();
+      } else if (kb.matches(data, "tui.select.cancel")) {
+        this.confirmingReverseSync = null;
       }
       this.requestRender();
       return;
@@ -533,6 +593,9 @@ export class GardenSelectorComponent {
     } else if (this.opts.copyToClipboard && isCtrlLetter(data, "y")) {
       this.doCopySubtree();
       return; // doCopySubtree 自渲染
+    } else if (this.opts.reverseSync && isCtrlLetter(data, "g")) {
+      void this.doPrepareReverseSync();
+      return;
     } else {
       if (this.searchInput.handleInput(data)) this.refilter();
     }
@@ -567,6 +630,12 @@ export class GardenSelectorComponent {
     if (this.confirmingDelete) {
       return this.theme.fg("error", truncateToWidth(`Delete session? Enter confirm · Esc cancel`, width, "…"));
     }
+    if (this.confirmingReverseSync) {
+      const p = this.confirmingReverseSync;
+      const parts = [`${p.reparents} 换父`, `${p.deletes} 删除`, `${p.archives} 归档`];
+      if (p.detached) parts.push(`${p.detached} 脱钩为根`);
+      return this.theme.fg("error", truncateToWidth(`应用反向同步: ${parts.join(" · ")} — Enter 确认 · Esc 取消`, width, "…"));
+    }
     if (this.queryError) {
       return this.theme.fg("error", truncateToWidth(`正则无效: ${this.queryError}`, width, "…"));
     }
@@ -579,6 +648,7 @@ export class GardenSelectorComponent {
     if (this.opts.copyToClipboard) hints.push("Ctrl+Y 复制子树");
     if (this.opts.renameSession) hints.push("Ctrl+R 改名");
     if (this.opts.deleteSession) hints.push("Ctrl+D 删除");
+    if (this.opts.reverseSync) hints.push("Ctrl+G 反向同步");
     return this.theme.fg("muted", truncateToWidth(hints.join(" · "), width, "…"));
   }
 
