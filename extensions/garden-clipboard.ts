@@ -20,11 +20,15 @@ export interface SubtreeFileInfo {
 }
 
 /**
- * 子树复制文本（粘贴给其他 AI 作 context）：自解释头部 + 编号树（内联元数据）+ 绝对路径清单。
+ * 子树复制文本（粘贴给其他 AI 作 context）：关联会话头部 + Agent 查阅指南 + 编号树
+ * （内联元数据）+ 详情清单（名称/元数据/绝对路径）。
  * 设计要点：
- * - 目标 AI 零背景可读：头部说清 fork 语义 / 编号对应 / l1-l3 级别规则；
+ * - 💡 查阅指南是给接收 Agent 的行动指令：先按会话树挑 1-2 个节点读 l3 掌握上下文，
+ *   需要代码路径/工具日志再 grep 同名 l1——避免拿到 context 却跳过指引、直接去
+ *   全代码库搜索走弯路（2026-09-17 实测：旧模板措辞是"按需选读"，agent 忽略参考
+ *   资料转而大范围 grep，两轮独立会话重复同一弯路）；
  * - 不读文件即可判断相关性：树行内联 名称/msgs/size/日期；
- * - [n] 编号对齐树节点与路径（模型不擅长数行数）；
+ * - [n] 编号对齐树节点与详情条目（模型不擅长数行数）；
  * - 绝对路径（部分读文件工具不展开 ~）；
  * - 日期用绝对值（相对时间在粘贴后失真）。
  * flat = flattenSessionTree([子树根]) 的结果（depth 相对子树根）；只 stat 不读正文。
@@ -32,17 +36,15 @@ export interface SubtreeFileInfo {
 export function buildSubtreeCopyText(flat: FlatNode[], resolveFile: (item: SessionListItem) => SubtreeFileInfo): string {
   const infos = flat.map((n) => resolveFile(n.session));
   const known = infos.filter((i) => i.size !== null).length;
-  const total = known > 0 ? ` · 合计 ~${formatSizeLabel(infos.reduce((a, i) => a + (i.size ?? 0), 0))}` : "";
-  const root = flat[0].session;
+  const total = known > 0 ? ` · ${formatSizeLabel(infos.reduce((a, i) => a + (i.size ?? 0), 0))}` : "";
   const lines: string[] = [
-    `# 会话子树索引（共 ${flat.length} 条对话${total} · 项目 ${root.cwd}）`,
+    `🗂️ 关联历史会话 (${flat.length} 条${total})`,
+    "💡 Agent 查阅指南：",
+    "1. 锁定线索：执行代码搜索前，请先结合下方的会话树挑选 1-2 个最相关的节点。",
+    "2. 渐进挖掘：优先使用工具直接读取下方对应的 `.l3.md` 掌握上下文。",
+    "3. 深入细节：若需具体代码路径或执行日志，再 `grep` 同名的 `.l1.md`（将下方路径后缀改为 .l1.md 即可）。",
     "",
-    "一组关联 AI 对话的索引：子会话由父会话 fork（继承其上下文起点）。每条对话的完整内容",
-    "是下方同编号的本地 md 文件，可直接用工具读取。同名 .l1.md（如存在）比 .l3.md 含更多",
-    "工具调用与推理细节。请按名称/消息数/大小/日期选读。",
-    "",
-    "## 树",
-    "",
+    "🌲 会话树",
   ];
   flat.forEach((n, i) => {
     const meta = `${n.session.messageCount} msgs · ${formatSizeLabel(infos[i].size)} · ${formatDate(n.session.modified)}`;
@@ -54,8 +56,12 @@ export function buildSubtreeCopyText(flat: FlatNode[], resolveFile: (item: Sessi
     const parts = n.ancestorContinues.slice(1).map((c) => (c ? "│  " : "   "));
     lines.push(`${parts.join("")}${n.isLast ? "└─ " : "├─ "}[${i + 1}] ${nodeLabel(n.session)} — ${meta}`);
   });
-  lines.push("", "## 文件", "");
-  flat.forEach((n, i) => lines.push(`[${i + 1}] ${infos[i].path}`));
+  lines.push("", "📄 详情与文件");
+  flat.forEach((n, i) => {
+    if (i > 0) lines.push("");
+    const meta = `${n.session.messageCount} msgs · ${formatSizeLabel(infos[i].size)} · ${formatDate(n.session.modified)}`;
+    lines.push(`[${i + 1}] ${nodeLabel(n.session)} (${meta})`, infos[i].path);
+  });
   return lines.join("\n") + "\n";
 }
 

@@ -337,7 +337,7 @@ test("formatSizeLabel: 各量级", () => {
   assert.equal(formatSizeLabel(1258291), "1.2MB");
 });
 
-test("buildSubtreeCopyText: 自解释头部 + 编号树（内联元数据）+ 绝对路径清单", () => {
+test("buildSubtreeCopyText: 头部 + 查阅指南 + 编号树（内联元数据）+ 详情清单", () => {
   const root = makeItem({ mdBase: "aaa", name: "根会话", messageCount: 10, modified: new Date("2026-09-14T12:00:00Z") });
   const child = makeItem({
     mdBase: "bbb",
@@ -361,15 +361,20 @@ test("buildSubtreeCopyText: 自解释头部 + 编号树（内联元数据）+ �
   }));
   const d = (s: SessionListItem): string => formatDate(s.modified);
   const lines = text.split("\n");
-  assert.equal(lines[0], `# 会话子树索引（共 3 条对话 · 合计 ~10KB · 项目 /tmp/proj）`);
-  assert.ok(lines[2].includes("fork"), "头部自解释 fork 语义");
-  assert.equal(lines[6], "## 树");
-  assert.equal(lines[8], `[1] 根会话 — 10 msgs · 8KB · ${d(root)}`);
-  assert.equal(lines[9], `└─ [2] "帮我看看这个报错" — 5 msgs · 2KB · ${d(child)}`, "无名回退首条消息摘要");
-  assert.equal(lines[10], `   └─ [3] untitled — 2 msgs · ? · ${d(grand)}`, "无名且无摘要 → untitled；size 缺失 → ?");
-  assert.equal(lines[12], "## 文件");
-  assert.equal(lines[14], "[1] /tmp/x/garden/--s--/aaa.l3.md");
-  assert.equal(lines[16], "[3] /tmp/x/garden/--s--/ccc.l3.md");
+  assert.equal(lines[0], `🗂️ 关联历史会话 (3 条 · 10KB)`);
+  assert.equal(lines[1], "💡 Agent 查阅指南：", "行动指引当头");
+  assert.ok(lines[2].includes("会话树") && lines[4].includes(".l1.md"), "指南：先读树选节点读 l3，细节再 grep l1");
+  assert.equal(lines[6], "🌲 会话树");
+  assert.equal(lines[7], `[1] 根会话 — 10 msgs · 8KB · ${d(root)}`);
+  assert.equal(lines[8], `└─ [2] "帮我看看这个报错" — 5 msgs · 2KB · ${d(child)}`, "无名回退首条消息摘要");
+  assert.equal(lines[9], `   └─ [3] untitled — 2 msgs · ? · ${d(grand)}`, "无名且无摘要 → untitled；size 缺失 → ?");
+  assert.equal(lines[11], "📄 详情与文件");
+  assert.equal(lines[12], `[1] 根会话 (10 msgs · 8KB · ${d(root)})`, "详情条目：名称 + 内联元数据");
+  assert.equal(lines[13], "/tmp/x/garden/--s--/aaa.l3.md", "详情条目次行 = 裸绝对路径");
+  assert.equal(lines[14], "", "详情条目间空行");
+  assert.equal(lines[15], `[2] "帮我看看这个报错" (5 msgs · 2KB · ${d(child)})`);
+  assert.equal(lines[18], `[3] untitled (2 msgs · ? · ${d(grand)})`);
+  assert.equal(lines[19], "/tmp/x/garden/--s--/ccc.l3.md");
   assert.ok(text.endsWith("\n"));
 });
 
@@ -397,7 +402,7 @@ test("选择器: Ctrl+Y 复制子树（叶子 / 整树 / 搜索态 / 失败 / �
   assert.ok(plain(h.c).includes("Ctrl+Y 复制子树"), "hint 常驻");
   h.c.handleInput("\x19"); // ctrl+y legacy
   assert.equal(h.copied.length, 1);
-  assert.ok(h.copied[0].startsWith("# 会话子树索引（共 1 条对话 · 项目 /tmp/proj）"), h.copied[0]);
+  assert.ok(h.copied[0].startsWith("🗂️ 关联历史会话 (1 条)"), h.copied[0]);
   assert.ok(h.copied[0].includes("[1] 别家 — 99 msgs"), h.copied[0]);
   assert.ok(!h.copied[0].includes("[2]"), "叶子不连带别的树");
 
@@ -443,9 +448,9 @@ test("选择器: Ctrl+Y 复制时 l3 缺失回退实际存在级别（真实文�
     const h = harness([root]);
     await flush();
     h.c.handleInput("\x19");
-    assert.ok(h.copied[0].includes(`[1] ${path.join(dir, "aaa.l1.md")}`), h.copied[0]);
-    assert.ok(h.copied[0].includes("2KB"), "stat 到真实大小");
-    assert.ok(h.copied[0].includes("合计 ~2KB"));
+    assert.ok(h.copied[0].includes(`(3 msgs · 2KB ·`), h.copied[0]);
+    assert.ok(h.copied[0].includes(`\n${path.join(dir, "aaa.l1.md")}\n`), "详情条目次行 = 裸路径，级别回退 l1");
+    assert.ok(h.copied[0].includes("· 2KB)"), "stat 到真实大小，头部合计无前缀", );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
