@@ -117,7 +117,7 @@
 | 导出 | 说明 |
 |------|------|
 | `GardenSelectorComponent` | `ctx.ui.custom` 组件：render/handleInput/invalidate/dispose + focused；构造即开始加载 current scope |
-| `LineInput` | 极简行输入（code-point 安全；插入/退格/移动/ctrl+a/e/u/k/w；粘贴换行变空格） |
+| `LineInput` | 极简行输入（code-point 安全；插入/退格/移动/ctrl+a/e/u/k/w；粘贴换行变空格，识别 bracketed paste `\x1b[200~…\x1b[201~`） |
 | `isCtrlLetter(data, letter)` | Ctrl+字母判定：legacy 控制字符 / Kitty CSI-u / modifyOtherKeys 三编码 |
 | `formatAge(date) => string` | 相对时间（now/m/h/d/w/mo/y，选择器行内用） |
 | `SelectorTheme` / `SelectorKeybindings` | 结构化注入接口（pi 的 Theme / KeybindingsManager 天然满足；组件零运行时 pi 依赖） |

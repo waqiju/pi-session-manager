@@ -113,6 +113,11 @@ function treePrefix(node: FlatNode): string {
  * 单行文本编辑：可打印字符插入（含粘贴整段）、backspace/delete、左右/Home/End、
  * ctrl+a/e/u/k/w。按 code point 操作（不劈开代理对）。不处理 escape 序列以外的
  * 控制字符；不认识的一律不消费（交回调用方）。
+ *
+ * 粘贴：pi 终端层开启 bracketed paste（\x1b[?2004h）并把粘贴重包装为
+ * `\x1b[200~<内容>\x1b[201~` 整串一次送达（pi-tui terminal.js），这里先剥标记
+ * 再走可打印分支——否则整串命中下面的 \x1b 守卫被静默丢弃。
+ * （对照：pi-tui Input.handleInput 同样显式识别 200~/201~。）
  */
 export class LineInput {
   private chars: string[] = [];
@@ -176,6 +181,12 @@ export class LineInput {
       this.chars.splice(i, this.cursor - i);
       this.cursor = i;
       return true;
+    }
+    // bracketed paste 解包：剥掉 \x1b[200~ / \x1b[201~ 标记，内容落到可打印分支
+    if (data.startsWith("\x1b[200~")) {
+      const body = data.slice(6);
+      const endIdx = body.indexOf("\x1b[201~");
+      data = endIdx === -1 ? body : body.slice(0, endIdx);
     }
     if (data.startsWith("\x1b")) return false; // 不认识的 escape 序列不消费
     // 可打印输入（含中文等宽字符、粘贴的整段文本）：剥掉控制字符，换行变空格

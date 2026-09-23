@@ -150,6 +150,25 @@ test("LineInput: 插入/退格/光标移动/ctrl+u/粘贴换行变空格", () =>
   assert.equal(input.handleInput("\x1b[1;5D"), false);
 });
 
+test("LineInput: bracketed paste（\x1b[200~…\x1b[201~，pi 终端层重包装格式）", () => {
+  const input = new LineInput();
+  input.handleInput("foo");
+  // 完整包装一次送达：剥标记后走可打印分支，换行变空格
+  assert.equal(input.handleInput("\x1b[200~line1\r\nline2 中文\x1b[201~"), true);
+  assert.equal(input.getValue(), "fooline1 line2 中文");
+  // 空粘贴不消费
+  assert.equal(input.handleInput("\x1b[200~\x1b[201~"), false);
+  // 缺尾标记的容锊：起始标记后的内容仍按文本插入
+  assert.equal(input.handleInput("\x1b[200~tail"), true);
+  assert.equal(input.getValue(), "fooline1 line2 中文tail");
+  // 光标中间插入
+  const mid = new LineInput();
+  mid.setValue("ab");
+  mid.handleInput("\x1b[D"); // left → 光标在 a|b
+  mid.handleInput("\x1b[200~XY\x1b[201~");
+  assert.equal(mid.getValue(), "aXYb");
+});
+
 test("LineInput: 渲染假光标（反显块）+ CURSOR_MARKER（对齐 pi-tui Input）", () => {
   const input = new LineInput();
   input.setValue("旧名"); // setValue 后光标在尾
