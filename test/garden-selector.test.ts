@@ -337,7 +337,7 @@ test("formatSizeLabel: 各量级", () => {
   assert.equal(formatSizeLabel(1258291), "1.2MB");
 });
 
-test("buildSubtreeCopyText: 头部 + 查阅指南 + 编号树（内联元数据）+ 详情清单", () => {
+test("buildSubtreeCopyText: 头部 + Best Practices + 编号树（内联元数据）+ 详情清单", () => {
   const root = makeItem({ mdBase: "aaa", name: "根会话", messageCount: 10, modified: new Date("2026-09-14T12:00:00Z") });
   const child = makeItem({
     mdBase: "bbb",
@@ -362,19 +362,21 @@ test("buildSubtreeCopyText: 头部 + 查阅指南 + 编号树（内联元数据�
   const d = (s: SessionListItem): string => formatDate(s.modified);
   const lines = text.split("\n");
   assert.equal(lines[0], `🗂️ 关联历史会话 (3 条 · 10KB)`);
-  assert.equal(lines[1], "💡 Agent 查阅指南：", "行动指引当头");
-  assert.ok(lines[2].includes("会话树") && lines[4].includes(".l1.md"), "指南：先读树选节点读 l3，细节再 grep l1");
-  assert.equal(lines[6], "🌲 会话树");
-  assert.equal(lines[7], `[1] 根会话 — 10 msgs · 8KB · ${d(root)}`);
-  assert.equal(lines[8], `└─ [2] "帮我看看这个报错" — 5 msgs · 2KB · ${d(child)}`, "无名回退首条消息摘要");
-  assert.equal(lines[9], `   └─ [3] untitled — 2 msgs · ? · ${d(grand)}`, "无名且无摘要 → untitled；size 缺失 → ?");
-  assert.equal(lines[11], "📄 详情与文件");
-  assert.equal(lines[12], `[1] 根会话 (10 msgs · 8KB · ${d(root)})`, "详情条目：名称 + 内联元数据");
-  assert.equal(lines[13], "/tmp/x/garden/--s--/aaa.l3.md", "详情条目次行 = 裸绝对路径");
-  assert.equal(lines[14], "", "详情条目间空行");
-  assert.equal(lines[15], `[2] "帮我看看这个报错" (5 msgs · 2KB · ${d(child)})`);
-  assert.equal(lines[18], `[3] untitled (2 msgs · ? · ${d(grand)})`);
-  assert.equal(lines[19], "/tmp/x/garden/--s--/ccc.l3.md");
+  assert.equal(lines[1], "💡 For Agent Best Practices:", "行动指引当头");
+  assert.ok(lines[2].includes(".l3.md") && lines[2].includes(".l1.md"), "先讲文件规范");
+  assert.ok(lines[4].includes("grep") && lines[4].includes("*.l3.md"), "步骤一：grep l3");
+  assert.ok(lines[5].includes("grep") && lines[5].includes("*.l1.md"), "步骤二：grep l1");
+  assert.equal(lines[7], "🌲 会话树");
+  assert.equal(lines[8], `[1] 根会话 — 10 msgs · 8KB · ${d(root)}`);
+  assert.equal(lines[9], `└─ [2] "帮我看看这个报错" — 5 msgs · 2KB · ${d(child)}`, "无名回退首条消息摘要");
+  assert.equal(lines[10], `   └─ [3] untitled — 2 msgs · ? · ${d(grand)}`, "无名且无摘要 → untitled；size 缺失 → ?");
+  assert.equal(lines[12], "📄 详情与文件");
+  assert.equal(lines[13], `[1] 根会话 (10 msgs · 8KB · ${d(root)})`, "详情条目：名称 + 内联元数据");
+  assert.equal(lines[14], "/tmp/x/garden/--s--/aaa.l3.md", "详情条目次行 = 裸绝对路径");
+  assert.equal(lines[15], "", "详情条目间空行");
+  assert.equal(lines[16], `[2] "帮我看看这个报错" (5 msgs · 2KB · ${d(child)})`);
+  assert.equal(lines[19], `[3] untitled (2 msgs · ? · ${d(grand)})`);
+  assert.equal(lines[20], "/tmp/x/garden/--s--/ccc.l3.md");
   assert.ok(text.endsWith("\n"));
 });
 
