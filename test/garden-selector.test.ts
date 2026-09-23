@@ -362,7 +362,7 @@ test("buildSubtreeCopyText: 头部 + Best Practices + 编号树（内联元数�
   const d = (s: SessionListItem): string => formatDate(s.modified);
   const lines = text.split("\n");
   assert.equal(lines[0], `🗂️ 关联历史会话 (3 条 · 10KB)`);
-  assert.equal(lines[1], "💡 For Agent Best Practices:", "行动指引当头");
+  assert.equal(lines[1], "💡 Best Practices for Agents:", "行动指引当头");
   assert.ok(lines[2].includes(".l3.md") && lines[2].includes(".l1.md"), "先讲文件规范");
   assert.ok(lines[4].includes("grep") && lines[4].includes("*.l3.md"), "步骤一：grep l3");
   assert.ok(lines[5].includes("grep") && lines[5].includes("*.l1.md"), "步骤二：grep l1");

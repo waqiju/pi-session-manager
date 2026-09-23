@@ -126,7 +126,7 @@
 
 | 导出 | 说明 |
 |------|------|
-| `buildSubtreeCopyText(flat, resolveFile) => string` | 子树复制文本：头部（N 条 · 总大小）+ 💡 For Agent Best Practices（l3/l1 文件规范 + 两步 grep SOP：先 l3 宏观、再同名 l1 细节）+ 编号树（内联元数据）+ 详情清单（名称/元数据/绝对路径）（粘贴给其他 AI 作 context） |
+| `buildSubtreeCopyText(flat, resolveFile) => string` | 子树复制文本：头部（N 条 · 总大小）+ 💡 Best Practices for Agents（l3/l1 文件规范 + 两步 grep SOP：先 l3 宏观、再同名 l1 细节）+ 编号树（内联元数据）+ 详情清单（名称/元数据/绝对路径）（粘贴给其他 AI 作 context） |
 | `copyToClipboard(text) => { ok, error? }` | pbcopy / clip.exe(WSL) / wl-copy / xclip；3s 超时 |
 | `COPY_SUBTREE_MAX` | 99；子树超过硬拒（防巨型树塞剪贴板） |
 

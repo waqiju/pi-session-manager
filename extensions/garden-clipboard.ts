@@ -20,10 +20,10 @@ export interface SubtreeFileInfo {
 }
 
 /**
- * 子树复制文本（粘贴给其他 AI 作 context）：关联会话头部 + Agent Best Practices + 编号树
+ * 子树复制文本（粘贴给其他 AI 作 context）：关联会话头部 + Best Practices for Agents + 编号树
  * （内联元数据）+ 详情清单（名称/元数据/绝对路径）。
  * 设计要点：
- * - 💡 Best Practices 是给接收 Agent 的两步 SOP：先 grep l3（宏观意图/结论）锁定线索，
+ * - 💡 Best Practices for Agents 是给接收 Agent 的两步 SOP：先 grep l3（宏观意图/结论）锁定线索，
  *   再 grep 同名 l1（推理/工具/具体文件）深入细节。2026-09-23 改版：旧版要求"先按树
  *   挑 1-2 个节点读 l3"，是标题判断陷阱——agent 凭标题判相关性后整体跳过、直奔代码
  *   搜索（实测复现）；改为 grep-first，第一步成本降到一条命令，用证据替代判断；
@@ -39,7 +39,7 @@ export function buildSubtreeCopyText(flat: FlatNode[], resolveFile: (item: Sessi
   const total = known > 0 ? ` · ${formatSizeLabel(infos.reduce((a, i) => a + (i.size ?? 0), 0))}` : "";
   const lines: string[] = [
     `🗂️ 关联历史会话 (${flat.length} 条${total})`,
-    "💡 For Agent Best Practices:",
+    "💡 Best Practices for Agents:",
     "1. 文件规范: `.l3.md`=宏观意图与结论; 同名的 `.l1.md`=底层推理、工具与具体文件。",
     "2. 调查步骤 (SOP):",
     "   - 步骤一: grep 相关的 `*.l3.md`，同步系统现状与现有架构逻辑。",
