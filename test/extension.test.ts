@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -328,6 +328,61 @@ test("扩展: /gardener-open 转换后打开最高级别 + 级别参数校验", 
       // ephemeral session
       await cmd.handler("", mockCtx(undefined, logs));
       assert.ok(logs.at(-1)?.includes("无 session 文件"), logs.join());
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("扩展: /gardener-open 必定先转换且按写路径真实 base 打开（2026-09-24 untitled 撞车开错文件回归）", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "garden-ext-test-"));
+  const sub = path.join(root, "sessions", "--tmp-proj--");
+  mkdirSync(sub, { recursive: true });
+  const gardenDir = path.join(root, "garden", "--tmp-proj--");
+  const d = localDate("2026-09-24T02:44:17.000Z");
+  const md = (n: number, l: string) => path.join(gardenDir, `${d}-${String(n).padStart(3, "0")}-untitled.${l}.md`);
+  const a = path.join(sub, "2026-09-24T02-44-17_a.jsonl");
+  const b = path.join(sub, "2026-09-24T08-03-20_b.jsonl");
+  try {
+    writeFileSync(a, sess("aaa", "2026-09-24T02:44:17.000Z"));
+    writeFileSync(b, sess("bbb", "2026-09-24T08:03:20.000Z"));
+    // 模拟 live 转换留下的现场：a=001；b 单 session 组算 001 → 避让 002（默认导 l1/l3）
+    convertSessionFile(a);
+    convertSessionFile(b);
+    assert.equal(ownerOf(md(1, "l3")), "aaa");
+    assert.equal(ownerOf(md(2, "l3")), "bbb");
+
+    await withEnv({ PI_GARDEN_OPEN_CMD: "true" }, async () => {
+      const { pi, commands } = mockPi();
+      garden(pi as any);
+      const cmd = commands.get("gardener-open")!;
+      const logs: string[] = [];
+
+      // 回归核心：open(b) 必须命中 b 的 002；旧 bug 按单 session 组重算恒 001 → 打开 a 的文件
+      await cmd.handler("", mockCtx(b, logs));
+      assert.ok(logs.at(-1)?.includes(`${d}-002-untitled.l3.md`), logs.join());
+      assert.equal(ownerOf(md(1, "l3")), "aaa", "a 的文件不得被动");
+
+      // open(a) 命中自己的 001
+      await cmd.handler("", mockCtx(a, logs));
+      assert.ok(logs.at(-1)?.includes(`${d}-001-untitled.l3.md`), logs.join());
+
+      // open 前必定增量转换：删掉 b 的 l3 → open 重建并命中 002（旧行为此时直接拿 a 的 001 当成果）
+      unlinkSync(md(2, "l3"));
+      await cmd.handler("", mockCtx(b, logs));
+      assert.ok(logs.at(-1)?.includes(`${d}-002-untitled.l3.md`), logs.join());
+      assert.equal(ownerOf(md(2, "l3")), "bbb", "b 的产物被重建且归属正确");
+
+      // 全程无重复造文件：目录里恰好 a/b 各两级产物
+      assert.deepEqual(
+        readdirSync(gardenDir).sort(),
+        [`${d}-001-untitled.l1.md`, `${d}-001-untitled.l3.md`, `${d}-002-untitled.l1.md`, `${d}-002-untitled.l3.md`].sort(),
+      );
+
+      // 转换不可用则 open 失败：session 文件已消失 → 告警，不打开不造文件
+      await cmd.handler("", mockCtx(path.join(sub, "2026-09-24T09-00-00_gone.jsonl"), logs));
+      assert.ok(logs.at(-1)?.includes("输出文件"), logs.join());
+      assert.equal(readdirSync(gardenDir).length, 4, "失败路径不得产生新文件");
     });
   } finally {
     rmSync(root, { recursive: true, force: true });

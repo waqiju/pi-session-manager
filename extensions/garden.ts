@@ -20,7 +20,8 @@
  *                        extensions/garden-selector.ts 头注）
  *   /gardener-output   → 转换当前 session（all = 全量回填 sessions 树；
  *                        index = 重建当前项目目录的 index.md）
- *   /gardener-open [lN]→ 默认浏览器打开当前 session 的 garden md（默认最高存在级别；
+ *   /gardener-open [lN]→ 默认浏览器打开当前 session 的 garden md（打开前必定增量转换，
+ *                        以写路径返回的真实文件名定位；默认最高存在级别；
  *                        index = 重建并打开当前项目目录的 index.md）
  *
  * 配置（env）：
@@ -229,7 +230,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.registerCommand("gardener-open", {
-    description: `默认浏览器打开当前 session 的 garden md（默认最高存在级别；可用 ${GARDEN_LEVELS.join("/")} 指定；index = 重建并打开目录索引）`,
+    description: `默认浏览器打开当前 session 的 garden md（打开前必定先增量转换；默认最高存在级别；可用 ${GARDEN_LEVELS.join("/")} 指定；index = 重建并打开目录索引）`,
     handler: async (args, ctx) => {
       const levelArg = args.trim();
       if (levelArg === "index") {
@@ -253,22 +254,21 @@ export default function (pi: ExtensionAPI) {
         notify(ctx, "gardener-open: 非常规 session 路径，无法推导 garden 目录", "warning");
         return;
       }
-      const base = path.basename(file, ".jsonl");
       const mdDir = path.join(p.outRoot, p.sub);
       const level = (levelArg || undefined) as GardenLevel | undefined;
-      // 输出文件名含计算出的命名 slug（如 2026-09-14-001-garden_开发会话），需用 prepareGroup 获取
-      let computeBase = (): string => base; // fallback: 直接用原始 basename
+      // open 前必定增量转换（isUpToDate 三项比对，新鲜时近乎零成本），保证打开的是最新内容；
+      // 文件名用 convertSessionFile 返回的真实 base（含 avoidForeignBase 避让结果），不自算——
+      // 单 session 组重算序号恒 001，同日撞 slug（untitled 最常见）时会打开兄弟 session 的文件；
+      // 且旧兜底「找不到才转换、仍按自算名字取」还会给本 session 重复造文件（2026-09-24 实例）。
+      // 转换失败则 open 失败，不做只读兜底（拿错文件比报错更糟）。
+      let res: ReturnType<typeof convertSessionFile>;
       try {
-        const prepared = prepareGroup([{ src: file, sub: p.sub }], () => {});
-        if (prepared.length > 0) computeBase = () => prepared[0].base;
-      } catch { /* 命名失败时退回原始 basename */ }
-      let target = pickHighestLevelFile(mdDir, computeBase(), level);
-      if (!target) {
-        // 无产物时先转换再取：指定级别 → 不在默认导出集也只生成该级别；未指定 → 按配置转换
-        if (level) convertSessionFile(file, [level]);
-        else convertCurrent(ctx);
-        target = pickHighestLevelFile(mdDir, computeBase(), level);
+        res = convertSessionFile(file, level ? [level] : cfg.levels);
+      } catch (e) {
+        notify(ctx, `gardener-open: 转换失败: ${(e as Error).message}`, "warning");
+        return;
       }
+      const target = res ? pickHighestLevelFile(mdDir, res.base, level) : null;
       if (!target) {
         notify(ctx, `gardener-open: 无 ${levelArg || "任何级别"} 的输出文件`, "warning");
         return;

@@ -37,7 +37,7 @@ ephemeral session（无 session 文件）静默跳过；非常规路径布局（
 | `/gardener-output` | 立即转换当前 session，notify 结果 |
 | `/gardener-output all` | 全量回填整个 sessions 树（等价 CLI 目录模式）；收尾重建有变化目录的 index.md |
 | `/gardener-output index` | 重建当前项目 garden 目录的 index.md（不转换） |
-| `/gardener-open [lN]` | 默认浏览器打开当前 session 的 garden md；默认取存在的最高级别（l3>l2>l1>l0），可指定级别；无产物时先转换再开（指定的级别不在默认导出集时，按需只生成该级别） |
+| `/gardener-open [lN]` | 默认浏览器打开当前 session 的 garden md；**打开前必定增量转换**（isUpToDate 三项比对，新鲜时近乎零成本），以写路径返回的真实文件名定位——不自算文件名（单 session 组重算序号恒 001，撞 slug 会开错文件；2026-09-24 实例）；默认取存在的最高级别（l3>l2>l1>l0），可指定级别（不在默认导出集时按需只生成该级别）；转换失败则 open 失败，不做只读兜底 |
 | `/gardener-open index` | 重建当前项目目录的 index.md 并用默认浏览器打开（打开前总是重建，保证看到最新） |
 
 ## /garden 快速选择器
