@@ -8,9 +8,10 @@ garden（pi-session-manager）：把 pi 的 session 记录（`.jsonl`，机器�
 
 ## 技术栈
 
-- Node.js ≥ 22.18，零依赖，无构建（原生 type-stripping 直接运行 `.ts`；只允许可擦除语法）
-  —— 例外：pi 扩展由 pi 的 jiti 加载，`extensions/` 下允许 `import type ... from "@earendil-works/pi-coding-agent"`
-  （仅类型导入，运行时被擦除，仍零依赖）
+- Node.js ≥ 22.18，无构建（原生 type-stripping 直接运行 `.ts`；只允许可擦除语法）
+  —— Markdown 转换核心零依赖；网页预览使用运行时依赖 `markdown-it`。
+  —— pi 扩展由 pi 的 jiti 加载，`extensions/` 下允许 `import type ... from "@earendil-works/pi-coding-agent"`
+  （仅类型导入，运行时被擦除）
 - 测试：`npm test`（node --test，fixture 覆盖全部 entry 类型 + 分支 + compaction；
   扩展用 mock pi 对象测试，见 test/extension.test.ts）
 

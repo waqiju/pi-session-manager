@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -41,15 +42,16 @@ function setup(): { root: string; sessionFile: string } {
 /** env 补丁在 fn 全程有效（含 async fn 的所有 await 之后），落定后才还原 */
 async function withEnv<T>(patch: Record<string, string | undefined>, fn: () => T | Promise<T>): Promise<T> {
   const saved: Record<string, string | undefined> = {};
-  for (const k of Object.keys(patch)) {
+  const effectivePatch = { SSH_CONNECTION: undefined, SSH_CLIENT: undefined, PI_GARDEN_OPEN_MODE: undefined, ...patch };
+  for (const k of Object.keys(effectivePatch)) {
     saved[k] = process.env[k];
-    if (patch[k] === undefined) delete process.env[k];
-    else process.env[k] = patch[k];
+    if (effectivePatch[k] === undefined) delete process.env[k];
+    else process.env[k] = effectivePatch[k];
   }
   try {
     return await fn(); // 必须 await：否则 finally 会在 async fn 的第一个 await 处提前还原
   } finally {
-    for (const k of Object.keys(patch)) {
+    for (const k of Object.keys(effectivePatch)) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }
@@ -387,6 +389,40 @@ test("扩展: /gardener-open 必定先转换且按写路径真实 base 打开（
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("扩展: SSH 网页打开文档/索引，切会话保留服务，reload/quit 释放端口", async () => {
+  const { root, sessionFile } = setup();
+  const socket = createServer();
+  await new Promise<void>((r) => socket.listen(0, "127.0.0.1", r));
+  const port = (socket.address() as { port: number }).port;
+  await new Promise<void>((r) => socket.close(() => r()));
+  try {
+    await withEnv({ SSH_CONNECTION: "client server", PI_GARDEN_PREVIEW_PORT: String(port), PI_GARDEN_OPEN_CMD: "command-that-must-not-run" }, async () => {
+      const { pi, commands, handlers } = mockPi();
+      garden(pi as any);
+      const logs: string[] = [];
+      const ctx = { ...mockCtx(sessionFile, logs), sessionManager: { getSessionFile: () => sessionFile, getSessionDir: () => path.dirname(sessionFile) } };
+      const open = commands.get("gardener-open")!;
+      const url = () => logs.at(-1)!.match(/http:\/\/[^\s]+/)![0];
+      try {
+        await open.handler("", ctx);
+        const docUrl = url();
+        assert.equal((await fetch(docUrl)).status, 200);
+        assert.ok(logs.at(-1)!.includes("ssh -L"));
+        await open.handler("index", ctx);
+        assert.match(await (await fetch(url())).text(), /href=/);
+        await handlers.get("session_shutdown")!({ reason: "resume" }, ctx);
+        assert.equal((await fetch(docUrl)).status, 200);
+        await handlers.get("session_shutdown")!({ reason: "reload" }, ctx);
+        await assert.rejects(fetch(docUrl));
+        await open.handler("l1", ctx);
+        assert.equal((await fetch(url())).status, 200, "port can be reopened after cleanup");
+      } finally {
+        await handlers.get("session_shutdown")!({ reason: "quit" }, ctx);
+      }
+    });
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("扩展: /garden 选择器在无 UI 模式下告警且不加载 pi 包", async () => {

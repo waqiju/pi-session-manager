@@ -1,6 +1,7 @@
 # 系统地图（garden 全景）
 
-garden 是单向的格式转换器：pi 的 session jsonl → 四级 markdown 归档。无服务端、无状态、可重复运行（幂等 + 增量）。
+garden 的转换核心是单向的：pi 的 session jsonl → garden md，可重复运行（幂等 + 增量）。
+SSH 网页预览另提供进程内按需只读 HTTP 服务，无独立守护进程。
 
 ## 全景
 
@@ -57,6 +58,7 @@ garden 是单向的格式转换器：pi 的 session jsonl → 四级 markdown �
 | `src/reverse-sync.ts` | 反向同步：人工编辑的 index.md（换父缩进 / to-delete / to-archive）对账并应用回 sessions；见 [reverse-sync](reverse-sync.md) |
 | `src/format.ts` | 会话展示格式化（nodeLabel / formatSizeLabel / formatDate），index.md 与子树复制共用 |
 | `src/textwidth.ts` | 终端文本宽度工具（ANSI 零宽 / CJK 宽字符 / 按列截断），供选择器渲染 |
+| `src/preview.ts` | SSH 网页预览：模式/端口配置、进程内 HTTP 服务、Markdown HTML 渲染、路径校验 |
 | `src/open.ts` | gardener-open：级别选择、平台检测、打开命令 |
 | `src/cli.ts` | 参数、目录扫描、命名计划、旧文件清理、增量判断、写盘 |
 | `src/naming.ts` | 输出文件命名：本地日期 + 组内序号 + slug（session_info.name → untitled 兜底） |

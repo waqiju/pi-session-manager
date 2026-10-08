@@ -8,7 +8,8 @@
 ## 快速开始
 
 ```bash
-# 要求：Node.js >= 22.18（原生 type-stripping，零依赖、无构建）
+# 要求：Node.js >= 22.18（原生 type-stripping，无构建）
+npm install --ignore-scripts --legacy-peer-deps # 安装网页预览依赖；不另装 pi peer
 node src/cli.ts                    # ~/.pi/agent/sessions → ~/.pi/agent/garden
 node src/cli.ts <sessions目录>     # 输出到其同级 garden/
 node src/cli.ts <xxx.jsonl>        # 单文件模式
@@ -33,6 +34,30 @@ canonicalizePath 会卡 ~22s；`PI_GARDEN_SELECTOR=builtin` 可回退官方组�
 `/gardener-output`（转换当前 session，`all` 全量回填，`index` 重建目录索引）、
 `/gardener-open [lN]`（浏览器打开 md；`index` 重建并打开目录索引）。
 触发点与 `PI_GARDEN*` 环境变量配置见 [extension 参考](wiki/internals/reference/extension.md)。
+
+## SSH 网页预览
+
+从 Windows / WSL SSH 到 Mac 运行 pi 时，连接时添加转发：
+
+```bash
+ssh -L 127.0.0.1:13322:127.0.0.1:13322 mac-host
+```
+
+远程执行 `/gardener-open [lN]` 或 `/gardener-open index`，检测到
+`SSH_CONNECTION` / `SSH_CLIENT` 后不启动远程浏览器，而是在 pi 提示中输出
+`http://localhost:13322/...`。手动点击/复制到客户端 Chrome 即可，无需同步 md。
+Windows 浏览器访问 WSL 的 localhost 转发需 WSL 网络配置支持。
+
+预览服务首次打开时按需启动，运行在 pi 进程内，仅监听 `127.0.0.1`，只读 garden
+Markdown，无访问令牌（仅用于可信本机 / SSH 转发环境，任何能访问该端口的人都可读取已注册 garden 根目录的 md）；索引相对链接可直接跳转。页面无外部资源、无脚本，刷新读取
+最新文件；切换会话保留服务，退出 / `/reload` 关闭服务并使旧链接失效。
+没有客户端助手或独立守护程序；URL 是否可点击取决于终端。
+
+- `PI_GARDEN_OPEN_MODE=auto|web|local`：默认 auto；tmux 检测不准时用 web/local 覆盖。
+- `PI_GARDEN_PREVIEW_PORT=13322`：端口占用时明确报错；改端口后同时调整 SSH `-L`。
+- 非 SSH 默认仍走本地打开器；`PI_GARDEN_OPEN_CMD` 只作用于 local 模式。
+
+详细配置见 [extension 参考](wiki/internals/reference/extension.md)。
 
 ## 目录索引（index.md）
 

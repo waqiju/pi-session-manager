@@ -37,7 +37,7 @@ ephemeral session（无 session 文件）静默跳过；非常规路径布局（
 | `/gardener-output` | 立即转换当前 session，notify 结果 |
 | `/gardener-output all` | 全量回填整个 sessions 树（等价 CLI 目录模式）；收尾重建有变化目录的 index.md |
 | `/gardener-output index` | 重建当前项目 garden 目录的 index.md（不转换） |
-| `/gardener-open [lN]` | 默认浏览器打开当前 session 的 garden md；**打开前必定增量转换**（isUpToDate 三项比对，新鲜时近乎零成本），以写路径返回的真实文件名定位——不自算文件名（单 session 组重算序号恒 001，撞 slug 会开错文件；2026-09-24 实例）；默认取存在的最高级别（l3>l2>l1>l0），可指定级别（不在默认导出集时按需只生成该级别）；转换失败则 open 失败，不做只读兜底 |
+| `/gardener-open [lN]` | SSH 下输出网页预览 URL，非 SSH 下用默认浏览器打开 md；**打开前必定增量转换**（isUpToDate 三项比对，新鲜时近乎零成本），以写路径返回的真实文件名定位——不自算文件名（单 session 组重算序号恒 001，撞 slug 会开错文件；2026-09-24 实例）；默认取存在的最高级别（l3>l2>l1>l0），可指定级别（不在默认导出集时按需只生成该级别）；转换失败则 open 失败，不做只读兜底 |
 | `/gardener-open index` | 重建当前项目目录的 index.md 并用默认浏览器打开（打开前总是重建，保证看到最新） |
 
 ## /garden 快速选择器
@@ -109,9 +109,33 @@ KeybindingsManager 不认扩展自定义 action（用户 keybindings.json 无法
 | `PI_GARDEN` | `1` | `0` = 完全停用扩展（不注册任何事件/命令） |
 | `PI_GARDEN_LEVELS` | `l1,l3` | 导出级别（逗号分隔，子集 `l0/l1/l2/l3`，大小写不敏感；全部非法回退默认）。l0 与源 jsonl 冗余、l2 语料与 l3 重叠，默认不导；旧配置产出的其他级别文件按归档语义保留，不会自动清理 |
 | `PI_GARDEN_LIVE_INTERVAL_S` | `60` | live 触发最小间隔（秒，可小数）；`0` = 关闭 live 触发 |
-| `PI_GARDEN_OPEN_CMD` | 平台默认 | 自定义打开命令；空格切分，含 `{file}` 替换否则追加为末参。平台默认：WSL `wslpath -w` + `cmd.exe /c start`，Linux `xdg-open`，macOS `open` |
+| `PI_GARDEN_OPEN_MODE` | `auto` | auto：检测 SSH_CONNECTION/SSH_CLIENT 后输出网页预览 URL，否则本地打开；web/local 强制覆盖（tmux 环境继承可能导致自动检测不准） |
+| `PI_GARDEN_PREVIEW_PORT` | `13322` | 网页预览固定端口（1–65535）；客户端需 SSH -L 转发同一端口，冲突明确报错，不自动换端口 |
+| `PI_GARDEN_OPEN_CMD` | 平台默认 | 仅本地打开模式生效。 自定义打开命令；空格切分，含 `{file}` 替换否则追加为末参。平台默认：WSL `wslpath -w` + `cmd.exe /c start`，Linux `xdg-open`，macOS `open` |
 | `PI_GARDEN_SELECTOR_FULLTEXT` | `1` | `/garden` 选择器用 garden md 正文作全文搜索语料；`0` = 关闭（退回只搜 id/name/cwd） |
 | `PI_GARDEN_SELECTOR` | 自绘组件 | `builtin` = 退回 pi 官方 SessionSelectorComponent（对比/排查用；drvfs 上会卡） |
+
+## SSH 网页预览
+
+客户端以 `ssh -L 127.0.0.1:13322:127.0.0.1:13322 <host>` 连接。
+远程 `/gardener-open [lN]` 或 `index` 先按原流程生成最新 md，再输出独占一行的
+`http://localhost:13322/r0/...`，由人类点击/复制到客户端浏览器。
+不启动远程浏览器，也不验证客户端是否已完成转发。Windows Chrome 访问 WSL localhost
+转发需客户端网络配置支持；终端不支持 URL 点击时复制即可。
+
+`src/preview.ts` 使用 Node HTTP + markdown-it，首次命令才监听 `127.0.0.1`。
+服务只读已注册 garden 根目录内的 `.md`；不列目录、不提供 jsonl，realpath 校验防路径
+越界（garden 根目录本身可以是软链）。无访问令牌，仅用于可信本机 / SSH 转发环境；
+任何能连接端口的人都可读取已注册根目录中的 md，不要转发监听到公共网络。
+响应包含 `X-Garden-Preview: 1`，错误正文以 `Garden preview:` 开头，便于辨认转发是否
+连接了正确服务；缺文件 404、无读取权限 403、渲染异常 500。HTML 原文关闭，嵌入图片不加载，
+CSP 禁用脚本与外部资源。相对 md 链接自动沿同一 URL 路径跳转；frontmatter 不显示。
+页面 no-store，每次刷新读最新 md；单文件上限 32MiB。
+
+new/resume/fork 保留服务和已有链接；quit/reload 关闭 socket（reload 后需重新执行命令
+获得新 URL）。HTTP server unref，不阻止 pi 进程退出；不产生后台进程。
+多个 pi 进程需配置不同端口并分别转发，不复用未知进程。网页预览不改 session 或 md 内容，
+因此不 bump GARDEN_VERSION。
 
 ## 行为细节
 

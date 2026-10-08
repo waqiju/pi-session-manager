@@ -43,6 +43,7 @@ import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { avoidForeignBase, collectJobs, convertGroup, DEFAULT_LEVELS, parseLevels, pathsForFile, prepareGroup, processFile, type LevelName } from "../src/cli.ts";
 import { GARDEN_LEVELS, isGardenLevel, openFile, pickHighestLevelFile, type GardenLevel } from "../src/open.ts";
+import { GardenPreview, previewPort, useWebPreview } from "../src/preview.ts";
 import { generateDirIndex, INDEX_FILE_NAME } from "../src/index-page.ts";
 import {
   archiveSessionFile,
@@ -111,6 +112,25 @@ export default function (pi: ExtensionAPI) {
 
   let lastConvertAt = 0;
   let lastErrorMsg = "";
+  let preview: GardenPreview | undefined;
+
+  /** Shared by document and index open; no browser launch in SSH/web mode. */
+  async function openTarget(file: string, gardenRoot: string, ctx: ExtensionContext): Promise<void> {
+    try {
+      if (useWebPreview(process.env)) {
+        const port = previewPort(process.env);
+        if (preview && preview.port !== port) { await preview.close(); preview = undefined; }
+        preview ??= new GardenPreview(port);
+        const url = await preview.urlFor(gardenRoot, file);
+        notify(ctx, `gardener-open: ${path.basename(file)}\n${url}\n在 SSH 客户端浏览器打开；需 ssh -L 127.0.0.1:${port}:127.0.0.1:${port} <host>（pi 退出 / reload 后链接失效）`, "info");
+      } else {
+        const r = await openFile(file, process.env);
+        notify(ctx, r.ok ? `gardener-open: 已打开 ${path.basename(file)}` : `gardener-open 失败: ${r.detail}`, r.ok ? "info" : "warning");
+      }
+    } catch (e) {
+      notify(ctx, `gardener-open 失败: ${(e as Error).message}`, "warning");
+    }
+  }
 
   function notify(ctx: ExtensionContext, msg: string, level: "info" | "warning"): void {
     if (ctx.hasUI) ctx.ui.notify(msg, level);
@@ -144,8 +164,13 @@ export default function (pi: ExtensionAPI) {
     convertCurrent(ctx);
   });
 
-  pi.on("session_shutdown", async (_event, ctx) => {
+  pi.on("session_shutdown", async (event, ctx) => {
     convertCurrent(ctx);
+    // new/resume/fork retain URLs; reload replaces the extension and must release its socket.
+    if (event.reason === "quit" || event.reason === "reload") {
+      await preview?.close();
+      preview = undefined;
+    }
   });
 
   pi.on("session_info_changed", async (_event, ctx) => {
@@ -230,14 +255,13 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.registerCommand("gardener-open", {
-    description: `默认浏览器打开当前 session 的 garden md（打开前必定先增量转换；默认最高存在级别；可用 ${GARDEN_LEVELS.join("/")} 指定；index = 重建并打开目录索引）`,
+    description: `打开当前 session 的 garden md（SSH 下输出网页预览 URL；先增量转换；可选 ${GARDEN_LEVELS.join("/")}；index = 重建并打开目录索引）`,
     handler: async (args, ctx) => {
       const levelArg = args.trim();
       if (levelArg === "index") {
         const r = await rebuildCurrentDirIndex(ctx);
         if (!r) return;
-        const o = await openFile(r.file, process.env);
-        notify(ctx, o.ok ? `gardener-open: 已打开 ${INDEX_FILE_NAME}` : `gardener-open 失败: ${o.detail}`, o.ok ? "info" : "warning");
+        await openTarget(r.file, path.dirname(path.dirname(r.file)), ctx);
         return;
       }
       if (levelArg && !isGardenLevel(levelArg)) {
@@ -273,8 +297,7 @@ export default function (pi: ExtensionAPI) {
         notify(ctx, `gardener-open: 无 ${levelArg || "任何级别"} 的输出文件`, "warning");
         return;
       }
-      const r = await openFile(target, process.env);
-      notify(ctx, r.ok ? `gardener-open: 已打开 ${path.basename(target)}` : `gardener-open 失败: ${r.detail}`, r.ok ? "info" : "warning");
+      await openTarget(target, p.outRoot, ctx);
     },
   });
 
