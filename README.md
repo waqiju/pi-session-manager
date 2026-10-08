@@ -50,11 +50,14 @@ Windows 浏览器访问 WSL 的 localhost 转发需 WSL 网络配置支持。
 
 预览服务首次打开时按需启动，运行在 pi 进程内，仅监听 `127.0.0.1`，只读 garden
 Markdown，无访问令牌（仅用于可信本机 / SSH 转发环境，任何能访问该端口的人都可读取已注册 garden 根目录的 md）；索引相对链接可直接跳转。页面无外部资源、无脚本，刷新读取
-最新文件；切换会话保留服务，退出 / `/reload` 关闭服务并使旧链接失效。
+最新文件。多个 pi 共用同一端口：首个 open 的 pi 托管服务，其他进程验证协议后复用；
+借用者退出不影响服务。宿主退出 / `/reload` 后服务暂停，任意 pi 再次 open 会启动新服务；
+文档根目录 URL 使用真实路径的稳定摘要，不再使用进程内 r0 编号，重新打开后可恢复原链接
+（其他根目录需各自再次 open 注册）。不产生独立后台进程。
 没有客户端助手或独立守护程序；URL 是否可点击取决于终端。
 
 - `PI_GARDEN_OPEN_MODE=auto|web|local`：默认 auto；tmux 检测不准时用 web/local 覆盖。
-- `PI_GARDEN_PREVIEW_PORT=13322`：端口占用时明确报错；改端口后同时调整 SSH `-L`。
+- `PI_GARDEN_PREVIEW_PORT=13322`：同版 garden 自动共用；被其他程序或旧版占用时明确报错；改端口后同时调整 SSH `-L`。
 - 非 SSH 默认仍走本地打开器；`PI_GARDEN_OPEN_CMD` 只作用于 local 模式。
 
 详细配置见 [extension 参考](wiki/internals/reference/extension.md)。

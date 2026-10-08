@@ -122,7 +122,7 @@ export default function (pi: ExtensionAPI) {
         if (preview && preview.port !== port) { await preview.close(); preview = undefined; }
         preview ??= new GardenPreview(port);
         const url = await preview.urlFor(gardenRoot, file);
-        notify(ctx, `gardener-open: ${path.basename(file)}\n${url}\n在 SSH 客户端浏览器打开；需 ssh -L 127.0.0.1:${port}:127.0.0.1:${port} <host>（pi 退出 / reload 后链接失效）`, "info");
+        notify(ctx, `gardener-open: ${path.basename(file)}\n${url}\n在 SSH 客户端浏览器打开；需 ssh -L 127.0.0.1:${port}:127.0.0.1:${port} <host>（宿主 pi 退出 / reload 后暂停；任意 pi 再次 open 可恢复）`, "info");
       } else {
         const r = await openFile(file, process.env);
         notify(ctx, r.ok ? `gardener-open: 已打开 ${path.basename(file)}` : `gardener-open 失败: ${r.detail}`, r.ok ? "info" : "warning");

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
@@ -17,6 +18,8 @@ export function previewPort(env: NodeJS.ProcessEnv): number {
   return Number(raw);
 }
 
+const PROTOCOL = "garden-preview-v2";
+const rootKey = (root: string) => createHash("sha256").update(root).digest("hex").slice(0, 16);
 const escape = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const inside = (root: string, file: string) => {
   const rel = path.relative(root, file);
@@ -28,7 +31,7 @@ const css = `:root{color-scheme:light dark}body{max-width:1100px;margin:32px aut
 export class GardenPreview {
   private server: Server | undefined;
   private starting: Promise<void> | undefined;
-  private roots: string[] = [];
+  private roots = new Map<string, string>();
   private markdown = new MarkdownIt({ html: false, linkify: false });
   readonly port: number;
 
@@ -58,14 +61,40 @@ export class GardenPreview {
         res.end(req.method === "HEAD" ? undefined : `Garden preview: ${detail}`);
       };
       void (async () => {
+        // Control routes are localhost-only, versioned and reject browser-origin requests.
+        if (req.url === "/_garden/health" && req.method === "GET") {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ protocol: PROTOCOL }));
+          return;
+        }
+        if (req.url === "/_garden/register" && req.method === "POST") {
+          if (req.headers.origin || req.headers["x-garden-protocol"] !== PROTOCOL || req.headers["content-type"] !== "application/json") return fail(403);
+          let body = "";
+          for await (const chunk of req) {
+            body += chunk.toString();
+            if (Buffer.byteLength(body) > 16_384) return fail(413);
+          }
+          let registration: { root?: unknown; file?: unknown };
+          try { registration = JSON.parse(body); } catch { return fail(400); }
+          if (typeof registration.root !== "string" || typeof registration.file !== "string") return fail(400);
+          const root = await realpath(registration.root);
+          const file = await realpath(registration.file);
+          if (!inside(root, file) || !file.endsWith(".md") || !(await stat(file)).isFile()) return fail(403);
+          const id = rootKey(root);
+          this.roots.set(id, root);
+          const relative = path.relative(root, file).split(path.sep).map(encodeURIComponent).join("/");
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ protocol: PROTOCOL, path: `/r${id}/${relative}` }));
+          return;
+        }
         if (req.method !== "GET" && req.method !== "HEAD") return fail(405);
         let segments: string[];
         try {
           segments = (req.url ?? "").split("?")[0].split("/").slice(1).map(decodeURIComponent);
         } catch { return fail(400); }
         const [rootId, ...parts] = segments;
-        if (!/^r\d+$/.test(rootId ?? "")) return fail(404);
-        const root = this.roots[Number(rootId.slice(1))];
+        if (!/^r[a-f0-9]{16}$/.test(rootId ?? "")) return fail(404);
+        const root = this.roots.get(rootId.slice(1));
         if (!root || !parts.length || parts.some((p) => !p || p === "." || p === ".." || /[\\/\0]/.test(p))) return fail(404);
         const file = await realpath(path.join(root, ...parts));
         if (!inside(root, file) || !file.endsWith(".md")) return fail(404);
@@ -86,7 +115,9 @@ export class GardenPreview {
     this.starting = new Promise<void>((resolve, reject) => {
       const error = (e: NodeJS.ErrnoException) => {
         this.server = undefined;
-        reject(new Error(e.code === "EADDRINUSE" ? `预览端口 ${this.port} 已占用；请设置 PI_GARDEN_PREVIEW_PORT 并同步调整 SSH -L` : e.message));
+        // Another pi may own the port. urlFor verifies its protocol before reuse.
+        if (e.code === "EADDRINUSE") resolve();
+        else reject(e);
       };
       server.once("error", error);
       server.listen(this.port, "127.0.0.1", () => {
@@ -104,11 +135,28 @@ export class GardenPreview {
     const root = await realpath(gardenRoot);
     const target = await realpath(file);
     if (!inside(root, target) || !target.endsWith(".md")) throw new Error("预览文件必须是 garden 根目录内的 Markdown");
-    let id = this.roots.indexOf(root);
-    if (id < 0) { id = this.roots.length; this.roots.push(root); }
     await this.start();
-    const relative = path.relative(root, target).split(path.sep).map(encodeURIComponent).join("/");
-    return `http://localhost:${this.port}/r${id}/${relative}`;
+    const base = `http://127.0.0.1:${this.port}`;
+    try {
+      const health = await fetch(`${base}/_garden/health`, { signal: AbortSignal.timeout(3000), redirect: "error" });
+      if (!health.ok || health.headers.get("x-garden-preview") !== "1" || (await health.json()).protocol !== PROTOCOL) {
+        throw new Error("不是兼容的 garden 预览服务");
+      }
+      const response = await fetch(`${base}/_garden/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Garden-Protocol": PROTOCOL },
+        body: JSON.stringify({ root, file: target }),
+        signal: AbortSignal.timeout(3000),
+        redirect: "error",
+      });
+      if (!response.ok) throw new Error(`注册文档失败（HTTP ${response.status}）`);
+      const result = await response.json();
+      const expected = `/r${rootKey(root)}/${path.relative(root, target).split(path.sep).map(encodeURIComponent).join("/")}`;
+      if (result.protocol !== PROTOCOL || result.path !== expected) throw new Error("预览服务响应不兼容");
+      return `http://localhost:${this.port}${expected}`;
+    } catch (e) {
+      throw new Error(`预览端口 ${this.port} 无法复用：${(e as Error).message}；若被其他程序或旧版 garden 占用，请退出 / reload 宿主 pi，或更改 PI_GARDEN_PREVIEW_PORT 和 SSH -L`);
+    }
   }
 
   async close(): Promise<void> {

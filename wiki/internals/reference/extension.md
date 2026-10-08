@@ -119,7 +119,7 @@ KeybindingsManager 不认扩展自定义 action（用户 keybindings.json 无法
 
 客户端以 `ssh -L 127.0.0.1:13322:127.0.0.1:13322 <host>` 连接。
 远程 `/gardener-open [lN]` 或 `index` 先按原流程生成最新 md，再输出独占一行的
-`http://localhost:13322/r0/...`，由人类点击/复制到客户端浏览器。
+`http://localhost:13322/r<根目录摘要>/...`，由人类点击/复制到客户端浏览器。
 不启动远程浏览器，也不验证客户端是否已完成转发。Windows Chrome 访问 WSL localhost
 转发需客户端网络配置支持；终端不支持 URL 点击时复制即可。
 
@@ -132,9 +132,17 @@ KeybindingsManager 不认扩展自定义 action（用户 keybindings.json 无法
 CSP 禁用脚本与外部资源。相对 md 链接自动沿同一 URL 路径跳转；frontmatter 不显示。
 页面 no-store，每次刷新读最新 md；单文件上限 32MiB。
 
-new/resume/fork 保留服务和已有链接；quit/reload 关闭 socket（reload 后需重新执行命令
-获得新 URL）。HTTP server unref，不阻止 pi 进程退出；不产生后台进程。
-多个 pi 进程需配置不同端口并分别转发，不复用未知进程。网页预览不改 session 或 md 内容，
+new/resume/fork 保留服务和已有链接；多个 pi 共用服务，首个成功绑定端口的 pi 是宿主，
+其他 pi 通过 `/_garden/health` 验证协议 `garden-preview-v2`，再通过 `/_garden/register`
+POST 注册真实 garden 根目录和目标 md。注册仅接受 JSON 和自定义协议头，拒绝浏览器
+Origin 请求；这是可信本机控制接口，不是认证边界，不应暴露到公共网络。
+根目录 ID 使用真实路径 SHA-256 的前 16 位，不依赖进程注册顺序，避免 r0 指向不同目录。
+
+宿主 quit/reload 关闭 socket；借用者 quit/reload 不关闭宿主。任意 pi 下次 open 时
+重新尝试绑定端口，宿主不存在则接管；并发竞争以端口绑定为准，失败者验证并复用赢家。
+接管后只恢复再次注册过的根目录，同根目录文档原 URL 可重新使用。HTTP server unref，
+不阻止宿主进程退出；不产生后台进程。占用者不是兼容服务（含旧版 garden）时明确报错，
+不盲目复用，不自动换端口。网页预览不改 session 或 md 内容，
 因此不 bump GARDEN_VERSION。
 
 ## 行为细节

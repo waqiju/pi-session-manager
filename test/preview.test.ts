@@ -1,5 +1,8 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -43,7 +46,7 @@ test("preview: render, relative links, fresh reads and path restrictions", async
     const url = await preview.urlFor(path.join(dir, "garden-alias"), doc);
     const concurrent = await Promise.all([preview.urlFor(root, index), preview.urlFor(root, doc)]);
     assert.equal(concurrent[1], url, "reuse canonical root and port; no token in URL");
-    assert.match(new URL(url).pathname, /^\/r0\//);
+    assert.match(new URL(url).pathname, /^\/r[a-f0-9]{16}\//);
     const response = await fetch(url);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("x-garden-preview"), "1");
@@ -68,7 +71,7 @@ test("preview: render, relative links, fresh reads and path restrictions", async
     const missing = await fetch(`${prefix}/missing.md`);
     assert.equal(missing.status, 404);
     assert.match(await missing.text(), /Garden preview: Markdown file not found/);
-    assert.equal((await fetch(url.replace("/r0/", "/r999/"))).status, 404);
+    assert.equal((await fetch(url.replace(/\/r[a-f0-9]{16}\//, "/r0000000000000000/"))).status, 404);
     assert.equal((await fetch(url, { method: "POST" })).status, 405);
     assert.equal((await fetch(url, { method: "HEAD" })).status, 200);
     await assert.rejects(preview.urlFor(root, outside));
@@ -81,8 +84,59 @@ test("preview: render, relative links, fresh reads and path restrictions", async
   }
 });
 
+test("preview: multiple clients share roots, borrowers do not close owner, takeover restores stable URLs", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "garden-web-shared-"));
+  const roots = [path.join(dir, "a"), path.join(dir, "b")];
+  for (const root of roots) { mkdirSync(root); writeFileSync(path.join(root, "doc.md"), `# ${path.basename(root)}`); }
+  const port = await freePort();
+  const owner = new GardenPreview(port);
+  const borrower = new GardenPreview(port);
+  const next = new GardenPreview(port);
+  try {
+    const a = await owner.urlFor(roots[0], path.join(roots[0], "doc.md"));
+    const b = await borrower.urlFor(roots[1], path.join(roots[1], "doc.md"));
+    assert.match(await (await fetch(a)).text(), /<h1>a<\/h1>/);
+    assert.match(await (await fetch(b)).text(), /<h1>b<\/h1>/);
+    // A real separate Node process reuses the existing owner, then exits cleanly.
+    const moduleUrl = new URL("../src/preview.ts", import.meta.url).href;
+    const script = `import { GardenPreview } from ${JSON.stringify(moduleUrl)}; const p = new GardenPreview(${port}); console.log(await p.urlFor(${JSON.stringify(roots[0])}, ${JSON.stringify(path.join(roots[0], "doc.md"))})); await p.close();`;
+    const { stdout } = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", script], { timeout: 10_000 });
+    assert.equal(stdout.trim(), a);
+    await borrower.close();
+    assert.equal((await fetch(a)).status, 200, "borrower exit must not close shared service");
+    await owner.close();
+    await assert.rejects(fetch(a));
+    assert.equal(await next.urlFor(roots[0], path.join(roots[0], "doc.md")), a, "root identity survives owner change");
+    assert.equal((await fetch(a)).status, 200);
+    assert.equal(await borrower.urlFor(roots[1], path.join(roots[1], "doc.md")), b);
+    assert.equal((await fetch(b)).status, 200);
+    const register = `http://127.0.0.1:${port}/_garden/register`;
+    assert.equal((await fetch(register, { method: "POST", headers: { Origin: "https://evil.test", "Content-Type": "application/json", "X-Garden-Protocol": "garden-preview-v2" }, body: "{}" })).status, 403);
+    assert.equal((await fetch(register, { method: "POST", body: "{}" })).status, 403);
+  } finally {
+    await owner.close(); await borrower.close(); await next.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("preview: simultaneous first opens elect one owner by port binding", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "garden-web-race-"));
+  const file = path.join(dir, "doc.md");
+  writeFileSync(file, "# race");
+  const port = await freePort();
+  const clients = Array.from({ length: 4 }, () => new GardenPreview(port));
+  try {
+    const urls = await Promise.all(clients.map((p) => p.urlFor(dir, file)));
+    assert.equal(new Set(urls).size, 1);
+    assert.equal((await fetch(urls[0])).status, 200);
+  } finally {
+    for (const client of clients) await client.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("preview: port conflicts are explicit, never silently use another server", async () => {
-  const occupied = createServer();
+  const occupied = createHttpServer((_req, res) => { res.end('{"protocol":"other"}'); });
   await new Promise<void>((r) => occupied.listen(0, "127.0.0.1", r));
   const port = (occupied.address() as { port: number }).port;
   const dir = mkdtempSync(path.join(tmpdir(), "garden-web-conflict-"));
@@ -90,7 +144,7 @@ test("preview: port conflicts are explicit, never silently use another server", 
   writeFileSync(doc, "hello");
   const preview = new GardenPreview(port);
   try {
-    await assert.rejects(preview.urlFor(dir, doc), /已占用/);
+    await assert.rejects(preview.urlFor(dir, doc), /无法复用/);
   } finally {
     await preview.close();
     await new Promise<void>((r) => occupied.close(() => r()));
