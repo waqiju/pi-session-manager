@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { buildSubtreeCopyText, COPY_SUBTREE_MAX } from "../extensions/garden-clipboard.ts";
+import { buildSubtreeCopyText, copyToClipboard, COPY_SUBTREE_MAX } from "../extensions/garden-clipboard.ts";
 import { formatAge, GardenSelectorComponent, isCtrlLetter, LineInput } from "../extensions/garden-selector.ts";
 import { formatDate, formatSizeLabel } from "../src/format.ts";
 import type { SessionListItem } from "../src/session-list.ts";
@@ -397,6 +397,43 @@ test("buildSubtreeCopyText: 头部 + Best Practices + 编号树（内联元数�
   assert.equal(lines[19], `[3] untitled (2 msgs · ? · ${d(grand)})`);
   assert.equal(lines[20], "/tmp/x/garden/--s--/ccc.l3.md");
   assert.ok(text.endsWith("\n"));
+});
+
+test("clipboard adapter: Pi public API, remote size guard and error reporting", async () => {
+  const texts: string[] = [];
+  const load = async () => ({ copyToClipboard: async (text: string) => { texts.push(text); } });
+  assert.deepEqual(await copyToClipboard("中文", load, {}), { ok: true, remote: false });
+  assert.deepEqual(await copyToClipboard("中文", load, { SSH_CONNECTION: "client server" }), { ok: true, remote: true });
+  assert.deepEqual(texts, ["中文", "中文"]);
+  const oversized = await copyToClipboard("中".repeat(25_001), load, { SSH_CLIENT: "client" });
+  assert.equal(oversized.ok, false);
+  assert.match(oversized.error!, /OSC 52/);
+  assert.equal(texts.length, 2, "oversized remote copy must not silently write only remote clipboard");
+  const failure = await copyToClipboard("text", async () => ({ copyToClipboard: async () => { throw new Error("unavailable"); } }), {});
+  assert.deepEqual(failure, { ok: false, error: "unavailable" });
+});
+
+test("选择器: async clipboard busy guard, remote message, failure and disposal", async () => {
+  const item = makeItem({ mdBase: "aaa" });
+  let calls = 0;
+  let resolve!: (result: { ok: boolean; remote?: boolean }) => void;
+  const h = harness([item], undefined, { copyToClipboard: () => { calls++; return new Promise((r) => { resolve = r; }); } });
+  await flush();
+  h.c.handleInput("\x19"); h.c.handleInput("\x19");
+  assert.equal(calls, 1);
+  assert.match(plain(h.c), /正在复制/);
+  resolve({ ok: true, remote: true });
+  await flush();
+  assert.match(plain(h.c, 180), /复制请求到客户端终端/);
+  h.c.dispose();
+  const failed = harness([item], undefined, { copyToClipboard: async () => { throw new Error("async failure"); } });
+  await flush(); failed.c.handleInput("\x19"); await flush();
+  assert.match(plain(failed.c), /复制失败: async failure/);
+  failed.c.dispose();
+  const disposed = harness([item], undefined, { copyToClipboard: () => new Promise((r) => { resolve = r; }) });
+  await flush(); disposed.c.handleInput("\x19"); disposed.c.dispose();
+  resolve({ ok: true }); await flush();
+  assert.ok(!plain(disposed.c).includes("已复制"));
 });
 
 test("选择器: Ctrl+Y 复制子树（叶子 / 整树 / 搜索态 / 失败 / 未注入）", async () => {

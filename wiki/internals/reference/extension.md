@@ -80,7 +80,12 @@ session_id 清全部 md 产物；内存移除，**不做内建那样的全量重
 （粘贴给其他 AI 作 context，格式为目标 AI 优化：自解释头部说清 fork 语义与级别规则；
 树行内联 `[n] 名称 — msgs · size · 日期`，无名节点回退首条消息摘要；同编号绝对路径清单
 ——不用 `~`，部分读文件工具不展开。每个 session 取实际存在的最高级别 md；>99 硬拒；
-平台命令 pbcopy / clip.exe(WSL) / wl-copy / xclip，`buildSubtreeCopyText` 可直测）、
+平台剪贴板使用 Pi 公开 `copyToClipboard` API（动态加载、异步），本地走原生能力，
+SSH/MOSH 下发送 OSC 52 到客户端终端，无客户端助手。选择器复制期间防重复触发，
+异常给 toast；dispose 后不再更新 UI。远程成功提示仅为“已发送复制请求”，不能验证终端
+是否支持/允许 OSC 52（tmux 也需允许传递）。Base64 >100,000 字符预先拒绝，避免 Pi
+只写远程原生剪贴板却被误判为客户端成功；不截断内容。复制的绝对路径仍在运行 pi 的机器。
+`buildSubtreeCopyText` 可直测）、
 **Ctrl+G 反向同步**：把人工编辑过的 index.md（调缩进换父 / 行尾 `to-delete` / `to-archive`）
 应用回 sessions——先一一对账（数量 + id），确认条汇总 N 换父 · M 删除 · K 归档后执行；
 归档挪 jsonl 到 `1_archived/`（header 加 archivedTreePath/archivedAt，pi 容忍额外字段）。

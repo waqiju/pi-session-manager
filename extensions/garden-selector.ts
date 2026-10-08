@@ -61,8 +61,8 @@ export interface SelectorOptions {
   renameSession?: (item: SessionListItem, name: string) => Promise<string | undefined>;
   /** 新建子 session（parentSession = 选中项；空 session，pi 自动切换过去） */
   onNewChild?: (item: SessionListItem) => void;
-  /** 复制文本到系统剪贴板（平台命令注入；组件自持 toast 反馈） */
-  copyToClipboard?: (text: string) => { ok: boolean; error?: string };
+  /** Pi clipboard adapter; remote success means OSC 52 sent, not client acknowledgment. */
+  copyToClipboard?: (text: string) => { ok: boolean; error?: string; remote?: boolean } | Promise<{ ok: boolean; error?: string; remote?: boolean }>;
   /** 删除（jsonl + garden md 产物）；返回 ok/error */
   deleteSession?: (item: SessionListItem) => Promise<{ ok: boolean; error?: string }>;
   /**
@@ -264,6 +264,8 @@ export class GardenSelectorComponent {
   private requestRender: () => void;
   private opts: SelectorOptions;
 
+  private copying = false;
+  private disposed = false;
   private scope: Scope = "current";
   private mode: Mode = "list";
   private items: Record<Scope, SessionListItem[] | null> = { current: null, all: null };
@@ -301,6 +303,7 @@ export class GardenSelectorComponent {
   }
 
   dispose(): void {
+    this.disposed = true;
     if (this.statusTimeout) clearTimeout(this.statusTimeout);
   }
 
@@ -434,8 +437,8 @@ export class GardenSelectorComponent {
 
   // ----- 子树复制 -----
 
-  private doCopySubtree(): void {
-    if (!this.opts.copyToClipboard) return;
+  private async doCopySubtree(): Promise<void> {
+    if (!this.opts.copyToClipboard || this.copying || this.disposed) return;
     const selected = this.flat[this.selectedIndex];
     if (!selected) return;
     // 从当前 scope 全量 items 重建树（纯 Map 操作，亚毫秒），按对象同一性定位选中节点；
@@ -468,13 +471,25 @@ export class GardenSelectorComponent {
       }
       return { path: p, size };
     });
-    const r = this.opts.copyToClipboard(text);
-    if (r.ok) {
-      this.setStatus(`已复制 ${subtree.length} 个 session 到剪贴板`, "info", 2000);
-    } else {
-      this.setStatus(`复制失败: ${r.error ?? "未知错误"}`, "error", 4000);
-    }
+    this.copying = true;
+    this.setStatus("正在复制 …");
     this.requestRender();
+    try {
+      const pending = this.opts.copyToClipboard(text);
+      // Preserve synchronous injected callbacks; production Pi clipboard API is async.
+      const r = pending instanceof Promise ? await pending : pending;
+      if (this.disposed) return;
+      if (r.ok) {
+        this.setStatus(r.remote ? `已发送 ${subtree.length} 个 session 的复制请求到客户端终端（需支持 OSC 52）` : `已复制 ${subtree.length} 个 session 到剪贴板`, "info", r.remote ? 5000 : 2000);
+      } else {
+        this.setStatus(`复制失败: ${r.error ?? "未知错误"}`, "error", 4000);
+      }
+    } catch (e) {
+      if (!this.disposed) this.setStatus(`复制失败: ${e instanceof Error ? e.message : String(e)}`, "error", 4000);
+    } finally {
+      this.copying = false;
+      if (!this.disposed) this.requestRender();
+    }
   }
 
   // ----- 反向同步（index.md → sessions） -----
@@ -602,7 +617,7 @@ export class GardenSelectorComponent {
         return;
       }
     } else if (this.opts.copyToClipboard && isCtrlLetter(data, "y")) {
-      this.doCopySubtree();
+      void this.doCopySubtree();
       return; // doCopySubtree 自渲染
     } else if (this.opts.reverseSync && isCtrlLetter(data, "g")) {
       void this.doPrepareReverseSync();

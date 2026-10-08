@@ -3,7 +3,6 @@
  * 粘贴给其他 AI 作 context。零运行时 pi 依赖（node --test 可直测）。
  */
 
-import { spawnSync } from "node:child_process";
 import { formatDate, formatSizeLabel, nodeLabel } from "../src/format.ts";
 import type { SessionListItem } from "../src/session-list.ts";
 import type { FlatNode } from "../src/session-tree.ts";
@@ -66,27 +65,23 @@ export function buildSubtreeCopyText(flat: FlatNode[], resolveFile: (item: Sessi
   return lines.join("\n") + "\n";
 }
 
-/**
- * 平台剪贴板复制：pbcopy（macOS）/ clip.exe（WSL）/ wl-copy（Wayland）/ xclip（X11）。
- * spawnSync 同步喂 stdin，3s 超时；全部不可用返回 error 供选择器 toast。
- */
-export function copyToClipboard(text: string): { ok: boolean; error?: string } {
-  const cmds: [string, string[]][] = [];
-  if (process.platform === "darwin") {
-    cmds.push(["pbcopy", []]);
-  } else if (process.env.WSL_DISTRO_NAME) {
-    cmds.push(["clip.exe", []]);
-  } else {
-    if (process.env.WAYLAND_DISPLAY) cmds.push(["wl-copy", []]);
-    cmds.push(["xclip", ["-selection", "clipboard"]]);
-  }
-  for (const [cmd, args] of cmds) {
-    try {
-      const r = spawnSync(cmd, args, { input: text, timeout: 3000 });
-      if (r.status === 0) return { ok: true };
-    } catch {
-      /* 命令不存在等，试下一个 */
+/** Adapter keeps component/tests independent of the Pi runtime; production loads its public API lazily. */
+export async function copyToClipboard(
+  text: string,
+  load: () => Promise<{ copyToClipboard: (text: string) => Promise<void> }> = () => import("@earendil-works/pi-coding-agent"),
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ ok: boolean; error?: string; remote?: boolean }> {
+  const remote = Boolean(env.SSH_CONNECTION || env.SSH_CLIENT || env.MOSH_CONNECTION);
+  try {
+    // Pi may successfully write the remote native clipboard even when OSC 52 is too large.
+    // Reject explicitly rather than claim the client received an oversized request.
+    if (remote && Buffer.from(text, "utf8").toString("base64").length > 100_000) {
+      return { ok: false, error: "复制内容超过 OSC 52 上限（Base64 100,000 字符），请缩小子树范围" };
     }
+    const api = await load();
+    await api.copyToClipboard(text);
+    return { ok: true, remote };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
-  return { ok: false, error: "无可用剪贴板命令（尝试 pbcopy/clip.exe/xclip/wl-copy）" };
 }
