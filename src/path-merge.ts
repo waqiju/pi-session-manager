@@ -84,7 +84,11 @@ function inspectRoot(root: string, members: Member[], keeper: string): RootPlan 
     realDirs.add(real);
     for (const f of fs.readdirSync(dir).sort()) {
       const file = path.join(dir, f);
-      if (!fs.lstatSync(file).isFile()) throw new Error(`不支持嵌套目录或文件链接: ${file}`);
+      const entry = fs.lstatSync(file);
+      // Mono rebuilds this metadata at the new location; never copy it or snapshot its contents.
+      // Only the actual .mono directory is exempt (not a symlink or any other nested directory).
+      if (f === ".mono" && entry.isDirectory()) continue;
+      if (!entry.isFile()) throw new Error(`不支持嵌套目录或文件链接: ${file}`);
       const hash = digest(file);
       entries.push(`${sub}/${f}:${hash}`);
       if (hashes.has(f) && hashes.get(f) !== hash) throw new Error(`同名文件内容不同，未执行合并: ${file}`);
@@ -175,7 +179,6 @@ export function applyPathMerge(plan: PathMergePlan): string[] {
         fs.symlinkSync(fresh.keeper, path.join(op.root, sub), "dir"); op.installed.push(sub);
       }
     }
-    return stages.map((op) => op.backup);
   } catch (e) {
     const errors: string[] = [];
     for (const op of stages.reverse()) {
@@ -189,4 +192,15 @@ export function applyPathMerge(plan: PathMergePlan): string[] {
     }
     throw new Error(`${(e as Error).message}；${errors.length ? `回滚未完成: ${errors.join("; ")}` : "原目录已保留/恢复"}；备份/暂存: ${stages.map((s) => s.backup).join(", ")}`);
   }
+  // Delete disposable metadata only after every root has committed, so rollback retains it.
+  // Cleanup failure must not roll back an otherwise successful merge.
+  for (const op of stages) {
+    for (const sub of op.moved) {
+      const mono = path.join(op.backup, sub, ".mono");
+      if (!lstat(path.join(op.backup, sub))?.isDirectory() || !lstat(mono)?.isDirectory()) continue;
+      try { fs.rmSync(mono, { recursive: true, force: true }); }
+      catch (e) { throw new Error(`目录合并已完成，但旧 .mono 清理失败: ${mono}；${(e as Error).message}；备份: ${stages.map((s) => s.backup).join(", ")}`); }
+    }
+  }
+  return stages.map((op) => op.backup);
 }

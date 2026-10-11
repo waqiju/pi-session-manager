@@ -103,6 +103,69 @@ test("link creation failure during commit rolls back both roots", (t) => {
   }
 });
 
+test(".mono metadata is excluded and deleted from backups after successful merge", (t) => {
+  const f = fixture(t); f.add(wsl, "a"); f.add(mac, "b");
+  for (const kind of ["sessions", "garden"]) {
+    for (const cwd of [wsl, mac]) {
+      const mono = path.join(f.dir(kind, cwd), ".mono", "nested");
+      fs.mkdirSync(mono, { recursive: true });
+      fs.writeFileSync(path.join(mono, "same.meta"), cwd);
+    }
+  }
+  const plan = preparePathMerge(mac, f.dir("sessions", mac))!;
+  // Metadata changes do not invalidate confirmation; Mono will rebuild it.
+  fs.writeFileSync(path.join(f.dir("sessions", mac), ".mono", "new.meta"), "new");
+  const backups = applyPathMerge(plan);
+  for (const [i, kind] of ["sessions", "garden"].entries()) {
+    for (const cwd of [wsl, mac]) {
+      assert.ok(!fs.existsSync(path.join(f.dir(kind, cwd), ".mono")));
+      assert.ok(!fs.existsSync(path.join(backups[i], encodeCwd(cwd), ".mono")));
+    }
+    assert.equal(fs.readdirSync(f.dir(kind, wsl)).length, 2);
+  }
+  assert.equal(preparePathMerge(mac, f.dir("sessions", mac)), null);
+});
+
+test(".mono survives rollback if link creation fails", (t) => {
+  const f = fixture(t); f.add(wsl, "a"); f.add(mac, "b");
+  for (const kind of ["sessions", "garden"]) {
+    for (const cwd of [wsl, mac]) {
+      const mono = path.join(f.dir(kind, cwd), ".mono");
+      fs.mkdirSync(mono);
+      fs.writeFileSync(path.join(mono, "state.meta"), cwd);
+    }
+  }
+  const plan = preparePathMerge(mac, f.dir("sessions", mac))!;
+  const original = fs.symlinkSync;
+  t.mock.method(fs, "symlinkSync", (...args: Parameters<typeof fs.symlinkSync>) => {
+    if (args[1] === f.dir("garden", mac)) throw new Error("injected link failure");
+    return original(...args);
+  });
+  assert.throws(() => applyPathMerge(plan), /injected link failure.*原目录已保留\/恢复/);
+  for (const kind of ["sessions", "garden"]) {
+    for (const cwd of [wsl, mac]) {
+      assert.equal(fs.readFileSync(path.join(f.dir(kind, cwd), ".mono", "state.meta"), "utf8"), cwd);
+    }
+  }
+});
+
+test("only .mono directories are exempt; other hidden directories and symlinks still abort", (t) => {
+  const f = fixture(t); f.add(wsl, "a"); f.add(mac, "b");
+  const hidden = path.join(f.dir("sessions", mac), ".other");
+  fs.mkdirSync(hidden);
+  assert.throws(() => preparePathMerge(mac, f.dir("sessions", mac)), /嵌套目录/);
+  fs.rmSync(hidden, { recursive: true });
+  const target = fs.mkdtempSync(path.join(f.root, "external-"));
+  fs.writeFileSync(path.join(target, "keep.meta"), "keep");
+  const mono = path.join(f.dir("sessions", mac), ".mono");
+  fs.symlinkSync(target, mono, "dir");
+  assert.throws(() => preparePathMerge(mac, f.dir("sessions", mac)), /嵌套目录或文件链接/);
+  fs.unlinkSync(mono);
+  fs.symlinkSync(path.join(f.dir("sessions", mac), "b.jsonl"), mono);
+  assert.throws(() => preparePathMerge(mac, f.dir("sessions", mac)), /嵌套目录或文件链接/);
+  assert.equal(fs.readFileSync(path.join(target, "keep.meta"), "utf8"), "keep");
+});
+
 test("nested entries abort without changing originals", (t) => {
   const f = fixture(t); f.add(wsl, "a"); f.add(mac, "b");
   const plan = preparePathMerge(mac, f.dir("sessions", mac))!;

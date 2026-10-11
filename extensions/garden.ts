@@ -416,6 +416,7 @@ export default function (pi: ExtensionAPI) {
             `比较路径: ${plan.key}`,
             ...plan.members.map((m) => `${m.sub === plan.keeper ? "保留" : "链接"}: ${m.cwd} [${m.platform}]`),
             "合并 sessions + garden；保留原目录备份；不改历史路径。",
+            ".mono 目录不迁移，成功后删除旧元数据，由 Mono 自动重建。",
             "同名不同内容会阻止合并（包括 index.md）。",
             "请确认其他 Pi/机器已停止写入，且文件同步已完成并暂停。",
           ];
