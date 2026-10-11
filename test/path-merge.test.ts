@@ -53,12 +53,43 @@ test("current cwd only; priority WSL > Windows > Mac; merge + relative links + b
   assert.match(fs.readFileSync(path.join(f.dir("sessions", wsl), "c.jsonl"), "utf8"), /continued/);
 });
 
-test("same-name differences abort without mutations, including garden index", (t) => {
+test("sessions same-name differences still abort without mutations", (t) => {
   const f = fixture(t); f.add(wsl, "a"); f.add(mac, "b");
-  fs.writeFileSync(path.join(f.dir("garden", wsl), "index.md"), "one");
-  fs.writeFileSync(path.join(f.dir("garden", mac), "index.md"), "two");
+  fs.writeFileSync(path.join(f.dir("sessions", wsl), "same.jsonl"), "one");
+  fs.writeFileSync(path.join(f.dir("sessions", mac), "same.jsonl"), "two");
   assert.throws(() => preparePathMerge(mac, f.dir("sessions", mac)), /同名文件/);
   assert.ok(!fs.lstatSync(f.dir("sessions", mac)).isSymbolicLink());
+});
+
+test("garden conflicts select newest mtime, including index; ties use platform priority and warn", (t) => {
+  const f = fixture(t); f.add(wsl, "a"); f.add(win, "b"); f.add(mac, "c");
+  for (const name of ["index.md", "same.l3.md", "tie.txt"]) {
+    for (const [i, cwd] of [wsl, win, mac].entries()) {
+      const file = path.join(f.dir("garden", cwd), name);
+      fs.writeFileSync(file, cwd);
+      const time = name === "tie.txt" ? 1000 : name === "index.md" ? 1000 + i : 1002 - i;
+      fs.utimesSync(file, time, time);
+    }
+  }
+  const plan = preparePathMerge(mac, f.dir("sessions", mac))!;
+  assert.equal(plan.roots[0].warnings.length, 0);
+  assert.equal(plan.roots[1].warnings.length, 3);
+  const backups = applyPathMerge(plan);
+  assert.equal(fs.readFileSync(path.join(f.dir("garden", wsl), "index.md"), "utf8"), mac);
+  assert.equal(fs.readFileSync(path.join(f.dir("garden", wsl), "same.l3.md"), "utf8"), wsl);
+  assert.equal(fs.readFileSync(path.join(f.dir("garden", wsl), "tie.txt"), "utf8"), wsl);
+  assert.equal(fs.readFileSync(path.join(backups[1], encodeCwd(win), "index.md"), "utf8"), win);
+});
+
+test("garden mtime-only changes invalidate confirmation", (t) => {
+  const f = fixture(t); f.add(wsl, "a"); f.add(mac, "b");
+  for (const cwd of [wsl, mac]) {
+    const file = path.join(f.dir("garden", cwd), "index.md");
+    fs.writeFileSync(file, cwd); fs.utimesSync(file, 1000, 1000);
+  }
+  const plan = preparePathMerge(mac, f.dir("sessions", mac))!;
+  fs.utimesSync(path.join(f.dir("garden", mac), "index.md"), 2000, 2000);
+  assert.throws(() => applyPathMerge(plan), /已变化/);
 });
 
 test("stale confirmation rejected; identical files deduplicated", (t) => {

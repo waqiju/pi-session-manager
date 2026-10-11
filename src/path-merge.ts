@@ -22,7 +22,7 @@ export function encodeCwd(cwd: string): string {
 }
 
 interface Member { sub: string; cwd: string; rank: number; platform: string }
-interface RootPlan { root: string; snapshot: string; files: Map<string, string>; needsMerge: boolean }
+interface RootPlan { root: string; snapshot: string; files: Map<string, string>; needsMerge: boolean; warnings: string[] }
 export interface PathMergePlan {
   cwd: string;
   sessionDir: string;
@@ -71,6 +71,9 @@ function inspectRoot(root: string, members: Member[], keeper: string): RootPlan 
   const entries: string[] = [];
   const files = new Map<string, string>();
   const hashes = new Map<string, string>();
+  const mtimes = new Map<string, number>();
+  const conflicts = new Set<string>();
+  const isGarden = path.basename(root) === "garden";
   const realDirs = new Set<string>();
   let missing = false;
   for (const { sub } of members) {
@@ -90,15 +93,23 @@ function inspectRoot(root: string, members: Member[], keeper: string): RootPlan 
       if (f === ".mono" && entry.isDirectory()) continue;
       if (!entry.isFile()) throw new Error(`不支持嵌套目录或文件链接: ${file}`);
       const hash = digest(file);
-      entries.push(`${sub}/${f}:${hash}`);
-      if (hashes.has(f) && hashes.get(f) !== hash) throw new Error(`同名文件内容不同，未执行合并: ${file}`);
-      hashes.set(f, hash);
-      files.set(f, file);
+      entries.push(`${sub}/${f}:${hash}${isGarden ? `:${entry.mtimeMs}` : ""}`);
+      if (hashes.has(f) && hashes.get(f) !== hash) {
+        if (!isGarden) throw new Error(`同名文件内容不同，未执行合并: ${file}`);
+        conflicts.add(f);
+      }
+      // Equal timestamps retain the first candidate (WSL > Windows > Mac).
+      if (!files.has(f) || (isGarden && entry.mtimeMs > mtimes.get(f)!)) {
+        hashes.set(f, hash);
+        mtimes.set(f, entry.mtimeMs);
+        files.set(f, file);
+      }
     }
   }
   const keeperDir = path.join(root, keeper);
   const needsMerge = missing || realDirs.size > 1 || !lstat(keeperDir) || lstat(keeperDir)!.isSymbolicLink();
-  return { root, files, needsMerge, snapshot: JSON.stringify(entries) };
+  const warnings = [...conflicts].map((f) => `garden 同名文件内容不同，已按修改时间保留较新版本（同时间按平台优先级）: ${files.get(f)}`);
+  return { root, files, needsMerge, warnings, snapshot: JSON.stringify(entries) };
 }
 
 /** Only compares groups matching the current cwd. No global conflict chooser. */

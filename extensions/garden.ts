@@ -417,7 +417,7 @@ export default function (pi: ExtensionAPI) {
             ...plan.members.map((m) => `${m.sub === plan.keeper ? "保留" : "链接"}: ${m.cwd} [${m.platform}]`),
             "合并 sessions + garden；保留原目录备份；不改历史路径。",
             ".mono 目录不迁移，成功后删除旧元数据，由 Mono 自动重建。",
-            "同名不同内容会阻止合并（包括 index.md）。",
+            "sessions 同名不同内容仍阻止合并；garden 冲突保留修改时间较新的文件并警告。",
             "请确认其他 Pi/机器已停止写入，且文件同步已完成并暂停。",
           ];
         },
@@ -427,6 +427,9 @@ export default function (pi: ExtensionAPI) {
           if (!plan) throw new Error("请重新检测目录");
           if (!ctx.isIdle()) throw new Error("请等待当前 Pi 空闲后再合并");
           const backups = applyPathMerge(plan);
+          for (const root of plan.roots) {
+            for (const warning of root.warnings) notify(ctx, warning, "warning");
+          }
           const message = `目录合并完成；备份: ${backups.join(", ")}`;
           notify(ctx, message, "info");
           return "目录合并完成，列表已刷新；备份路径见通知";
