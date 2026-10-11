@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -36,6 +36,16 @@ function setup(): { root: string; gardenDir: string; sub: string } {
   mkdirSync(path.join(root, "sessions", sub), { recursive: true });
   return { root, gardenDir, sub };
 }
+
+test("All deduplicates project symlink aliases by session UUID", async () => {
+  const { root, gardenDir } = setup();
+  try {
+    writeFileSync(path.join(gardenDir, "a.l3.md"), buildMd({ session_id: "a", source: "a.jsonl" }));
+    symlinkSync(path.basename(gardenDir), path.join(root, "garden", "--alias--"), "dir");
+    const items = await listAllSessions(path.join(root, "garden"));
+    assert.equal(items.length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test("parseGardenFrontmatter: 全字段 + 坏输入容忍", () => {
   const fm = parseGardenFrontmatter(

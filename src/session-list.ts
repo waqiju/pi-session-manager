@@ -295,7 +295,9 @@ export async function listAllSessions(gardenRoot: string, opts: FastListOptions 
       },
     });
   });
-  return perDir.flat();
+  // Aliased project directories expose the same JSONL via different paths.
+  // Session UUID is stable; avoid duplicate roots/children in All after linking.
+  return [...new Map(perDir.flat().map((item) => [item.id, item])).values()];
 }
 
 /** 推导 sessionDir 对应的 garden 输出目录：<agentRoot>/sessions/<sub> → <agentRoot>/garden/<sub> */

@@ -425,6 +425,45 @@ test("扩展: SSH 网页打开文档/索引，切会话保留服务，reload/qui
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("扩展: hidden merge uses ctx.cwd, confirms before mutation, and refreshes", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "garden-merge-ext-"));
+  const cwd = "/Users/test/work/proj";
+  const sub = "--Users-test-work-proj--";
+  const sessionDir = path.join(root, "sessions", sub);
+  const keep = path.join(root, "sessions", "--mnt-d-work-proj--");
+  mkdirSync(sessionDir, { recursive: true }); mkdirSync(keep, { recursive: true });
+  writeFileSync(path.join(keep, "a.jsonl"), JSON.stringify({ type: "session", cwd: "/mnt/d/work/proj", id: "a" }) + "\n");
+  try {
+    await withEnv({ PI_GARDEN_SELECTOR: undefined }, async () => {
+      const { pi, commands } = mockPi(); garden(pi as any);
+      const logs: string[] = [];
+      let idle = false;
+      const ctx = {
+        cwd, hasUI: true, isIdle: () => idle,
+        sessionManager: { getSessionDir: () => sessionDir, getSessionFile: () => undefined },
+        ui: {
+          notify: (m: string) => logs.push(m),
+          custom: async (factory: any) => {
+            const c = factory({ requestRender() {} }, { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s },
+              { matches: (d: string, action: string) => d === "\r" && action === "tui.select.confirm" }, () => {});
+            const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); };
+            c.handleInput("\x1bm"); await flush();
+            assert.match(c.render(200).join("\n"), /空闲/);
+            idle = true; c.handleInput("\x1bm"); await flush();
+            assert.match(c.render(200).join("\n"), /保留: \/mnt\/d\/work\/proj/);
+            assert.equal(readdirSync(sessionDir).length, 0, "preview is read-only");
+            c.handleInput("\r"); await flush();
+            assert.ok(existsSync(path.join(sessionDir, "a.jsonl")));
+            c.dispose(); return null;
+          },
+        },
+      };
+      await commands.get("garden")!.handler("", ctx);
+      assert.ok(logs.some((s) => s.includes("目录合并完成")));
+    });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("扩展: /garden 选择器在无 UI 模式下告警且不加载 pi 包", async () => {
   const { root, sessionFile } = setup();
   try {

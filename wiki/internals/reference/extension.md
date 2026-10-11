@@ -97,6 +97,42 @@ KeybindingsManager 不认扩展自定义 action（用户 keybindings.json 无法
 裁剪：sort 三模式循环、named-only 过滤、path 显示开关（threaded + 搜索已覆盖）。
 回退：`PI_GARDEN_SELECTOR=builtin` 可切回官方组件（对比/排查用，drvfs 上会卡）。
 
+### 隐藏帮助（Ctrl+H）
+
+列表态按 Ctrl+H 在底部展开全部选择器操作说明（包括 Alt+M 与 Ctrl+H），再按收起。
+默认不显示这两个隐藏快捷键；帮助按终端宽度换行，展开时减少会话列表行数。
+重命名/确认/合并忙碌态不接管帮助键。传统终端若 Backspace 发送 `0x08`，与 Ctrl+H
+无法区分，会触发帮助；发送 DEL (`0x7f`) 的 Backspace 不受影响。
+
+### 隐藏的当前目录合并（Alt+M）
+
+仅自绘选择器的 Current scope 支持；默认不显示快捷键提示或菜单项，Ctrl+H 展开后可见。
+Alt+M 的 M 表示 Merge；支持 ESC+m、Kitty CSI-u、modifyOtherKeys 编码。
+Mac 终端需将 Option 配置为 Alt/Meta。旧 Ctrl+L 不再绑定。
+按键后以 `ctx.cwd` 为锚点，检查标准 sessions/garden 分组中属于当前目录的路径候选，
+不提供全局冲突列表，也不对其他项目执行操作。不引入 Project ID 或映射配置。
+
+- Windows 剥离 `X:/`，WSL 剥离 `/mnt/<盘符>/`，Mac 剥离 `/Users/<用户>/`
+  或 `/Volumes/<卷名>/`；统一分隔符但保留大小写。其余路径不猜测。
+- 编码目录名只作预筛选；从 JSONL header 或 Markdown frontmatter 读取原 cwd 验证，
+  避免 `a-b` 与 `a/b` 编码碰撞。当前目录尚未建立也可创建别名。
+- 保留实体目录优先级 WSL > Windows > Mac。同优先级多个首选目录时保守拒绝，
+  不增加二级选择器。已指向同一保留目录的组无需操作。
+- 确认页展示当前目录、候选及保留者；Enter 执行、Esc 取消。只允许当前 Pi 空闲时执行。
+  **其他 Pi/机器必须停止写入，文件同步完成后暂停同步**；无法自动锁住远端进程。
+- 同时处理 sessions/garden；同名同内容去重，同名不同内容（包括 `index.md`）拒绝整组。
+  嵌套目录、文件级软链接、指向分组根外的目录链接暂不支持。
+- 先复制校验与探测目录软链接权限，再复核确认时的快照，最后同步提交重命名/链接。
+  来源目录保留在各根目录 `.path-merge-<uuid>/`，通知输出备份路径；失败尝试回滚，
+  暂存/备份不自动删除。Windows 无创建 symlink 权限则报错，不回退 junction。
+- 原目录入口保持可访问，当前进程后续按原文件路径继续写入。历史 cwd/parentSession
+  不改写，不保证内建 `/resume` 的跨平台父路径识别。合并后刷新 Current 并失效 All 缓存；
+  All 按 session UUID 去重，当前会话删除保护兼容目录别名。
+- `index.md` 不在本操作中重建（可能有待反向同步的人工作业）；确认无待处理编辑后可运行
+  `/gardener-output index` 重建。跨平台链接仍需同步工具支持，功能不替代数据同步。
+
+实现：`src/path-merge.ts`；测试：`test/path-merge.test.ts` 与选择器/扩展集成测试。
+
 ### 实测（本机 drvfs，315 session）
 
 | 指标 | 内建组件 + 内建 loader | garden 自绘组件 |

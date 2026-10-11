@@ -54,6 +54,7 @@ import {
   type ReverseSyncPlan,
 } from "../src/reverse-sync.ts";
 import { gardenDirForSessionDir, gardenRootForSessionDir, listAllSessions, listProjectSessions } from "../src/session-list.ts";
+import { applyPathMerge, preparePathMerge, type PathMergePlan } from "../src/path-merge.ts";
 import { copyToClipboard } from "./garden-clipboard.ts";
 import { deleteGardenOutputs, deleteSessionFile } from "./garden-files.ts";
 import { GardenSelectorComponent } from "./garden-selector.ts";
@@ -402,6 +403,34 @@ export default function (pi: ExtensionAPI) {
           return { ok: true as const, message };
         },
       };
+      let pendingPathMerge: PathMergePlan | null = null;
+      const pathMerge = {
+        prepare: async () => {
+          pendingPathMerge = null;
+          if (!ctx.isIdle()) throw new Error("请等待当前 Pi 空闲后再合并");
+          const plan = preparePathMerge(ctx.cwd, sessionDir);
+          if (!plan) return null;
+          pendingPathMerge = plan;
+          return [
+            `当前目录: ${ctx.cwd}`,
+            `比较路径: ${plan.key}`,
+            ...plan.members.map((m) => `${m.sub === plan.keeper ? "保留" : "链接"}: ${m.cwd} [${m.platform}]`),
+            "合并 sessions + garden；保留原目录备份；不改历史路径。",
+            "同名不同内容会阻止合并（包括 index.md）。",
+            "请确认其他 Pi/机器已停止写入，且文件同步已完成并暂停。",
+          ];
+        },
+        apply: async () => {
+          const plan = pendingPathMerge;
+          pendingPathMerge = null;
+          if (!plan) throw new Error("请重新检测目录");
+          if (!ctx.isIdle()) throw new Error("请等待当前 Pi 空闲后再合并");
+          const backups = applyPathMerge(plan);
+          const message = `目录合并完成；备份: ${backups.join(", ")}`;
+          notify(ctx, message, "info");
+          return "目录合并完成，列表已刷新；备份路径见通知";
+        },
+      };
       if ((process.env.PI_GARDEN_SELECTOR ?? "").trim() === "builtin") {
         // 回退：pi 官方组件（内部 canonicalizePath 在 drvfs 上会卡 ~22s，仅用于对比/排查）。
         // 动态 import：仅在此分支才加载 pi 包（保持本文件可被零依赖测试）
@@ -437,6 +466,7 @@ export default function (pi: ExtensionAPI) {
                 void ctx.newSession({ parentSession: item.path });
               },
               copyToClipboard,
+              pathMerge,
               reverseSync,
               renameSession: async (item, name) => {
                 // 与内建 /resume 同一实现路径；随后立即重转，让 md frontmatter/文件名同步新名

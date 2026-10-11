@@ -4,7 +4,7 @@ import * as os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { buildSubtreeCopyText, copyToClipboard, COPY_SUBTREE_MAX } from "../extensions/garden-clipboard.ts";
-import { formatAge, GardenSelectorComponent, isCtrlLetter, LineInput } from "../extensions/garden-selector.ts";
+import { formatAge, GardenSelectorComponent, isAltLetter, isCtrlLetter, LineInput } from "../extensions/garden-selector.ts";
 import { formatDate, formatSizeLabel } from "../src/format.ts";
 import type { SessionListItem } from "../src/session-list.ts";
 import { buildSessionTree, flattenSessionTree } from "../src/session-tree.ts";
@@ -554,6 +554,61 @@ test("formatAge: 各量级", () => {
   assert.equal(formatAge(new Date(now - 14 * 86400_000)), "2w");
   assert.equal(formatAge(new Date(now - 60 * 86400_000)), "2mo");
   assert.equal(formatAge(new Date(now - 400 * 86400_000)), "1y");
+});
+
+// ---------- Hidden Alt+M / Ctrl+H ----------
+
+test("Alt+M hidden, current only, cancel/confirm, busy guard and refresh", async () => {
+  let prepared = 0, applied = 0;
+  const h = harness([], undefined, {
+    pathMerge: {
+      prepare: async () => { prepared++; return ["保留 WSL", "链接 Mac"]; },
+      apply: async () => { applied++; return "合并完成"; },
+    },
+  });
+  await flush();
+  assert.ok(!plain(h.c, 500).includes("Alt+M"));
+  h.c.handleInput("\x0c"); await flush(); assert.equal(prepared, 0, "old Ctrl+L removed");
+  h.c.handleInput("\x1bm"); h.c.handleInput("\x1bm");
+  await flush(); assert.equal(prepared, 1);
+  assert.match(plain(h.c), /保留 WSL/);
+  h.c.handleInput("x"); h.c.handleInput("\x1b");
+  assert.equal(applied, 0);
+  h.c.handleInput("\x1b[109;3u"); await flush();
+  h.c.handleInput("\r"); h.c.handleInput("\r"); await flush();
+  assert.equal(applied, 1); assert.equal(h.loadCounts.current, 2);
+  h.c.handleInput("\t"); await flush();
+  h.c.handleInput("\x1b[27;3;109~"); await flush();
+  assert.equal(prepared, 2); assert.match(plain(h.c), /仅支持 Current/);
+  h.c.dispose();
+});
+
+test("Alt+M no candidates/errors do not offer confirmation", async () => {
+  for (const prepare of [async () => null, async () => { throw new Error("同名冲突"); }]) {
+    const h = harness([], undefined, { pathMerge: { prepare, apply: async () => { throw new Error("must not run"); } } });
+    await flush(); h.c.handleInput("\x1bm"); await flush();
+    assert.match(plain(h.c), /未发现|同名冲突/);
+    assert.ok(!plain(h.c).includes("Enter 确认合并"));
+    h.c.dispose();
+  }
+});
+
+test("Alt letter encodings and hidden help toggle/wrapping", async () => {
+  for (const key of ["\x1bm", "\x1b[109;3u", "\x1b[109;67:1u", "\x1b[27;3;109~"]) assert.ok(isAltLetter(key, "m"));
+  for (const key of ["m", "\r", "\x1b[109;5u", "\x1b[109;4u"]) assert.ok(!isAltLetter(key, "m"));
+  const h = harness([], undefined, { pathMerge: { prepare: async () => null, apply: async () => "" } });
+  await flush();
+  assert.doesNotMatch(plain(h.c, 500), /Alt\+M|Ctrl\+H/);
+  h.c.handleInput("\x08");
+  assert.match(plain(h.c, 100), /Alt\+M/);
+  assert.match(plain(h.c, 100), /Ctrl\+H/);
+  for (const line of h.c.render(40)) assert.ok(visibleWidth(line) <= 40);
+  assert.match(plain(h.c, 40), /Alt\+M/);
+  h.c.handleInput("\x1b[104;5u");
+  assert.doesNotMatch(plain(h.c, 500), /Alt\+M|Ctrl\+H/);
+  h.c.handleInput("\x1b[27;5;104~");
+  assert.match(plain(h.c, 100), /Ctrl\+H/);
+  h.c.dispose();
 });
 
 // ---------- Ctrl+G 反向同步 ----------

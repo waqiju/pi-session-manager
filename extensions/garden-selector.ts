@@ -74,6 +74,11 @@ export interface SelectorOptions {
     prepare: () => Promise<{ ok: true; preview: ReverseSyncPreview } | { ok: false; error: string }>;
     apply: () => Promise<{ ok: true; message: string } | { ok: false; error: string }>;
   };
+  /** Hidden Alt+M: current cwd only; shown only in expanded help. */
+  pathMerge?: {
+    prepare: () => Promise<string[] | null>;
+    apply: () => Promise<string>;
+  };
   /** 终端高度（可选，用于自适应 maxVisible）；不传则回退 process.stdout.rows / 24 */
   getTerminalHeight?: () => number;
   maxVisible?: number;
@@ -253,6 +258,15 @@ export function isCtrlLetter(data: string, letter: string): boolean {
   return Number(m[1]) === code && (modifier & ~KITTY_LOCK_MASK) === 4;
 }
 
+export function isAltLetter(data: string, letter: string): boolean {
+  const code = letter.charCodeAt(0);
+  if (data === `\x1b${letter}` || data === `\x1b[27;3;${code}~`) return true;
+  const m = data.match(/^\x1b\[(\d+)(?::\d*)?(?::\d+)?(?:;(\d+))?(?::\d+)?u$/);
+  if (!m) return false;
+  const modifier = m[2] === undefined ? 0 : Number(m[2]) - 1;
+  return Number(m[1]) === code && (modifier & ~KITTY_LOCK_MASK) === 2;
+}
+
 // ---------- 选择器组件 ----------
 
 type Scope = "current" | "all";
@@ -264,6 +278,7 @@ export class GardenSelectorComponent {
   private requestRender: () => void;
   private opts: SelectorOptions;
 
+  private showHelp = false;
   private copying = false;
   private disposed = false;
   private scope: Scope = "current";
@@ -276,6 +291,8 @@ export class GardenSelectorComponent {
   private searchInput = new LineInput();
   private renameInput = new LineInput();
   private renameTarget: SessionListItem | null = null;
+  private confirmingPathMerge: string[] | null = null;
+  private mergingPaths = false;
   private confirmingDelete: SessionListItem | null = null;
   private confirmingReverseSync: ReverseSyncPreview | null = null;
   private flat: FlatNode[] = [];
@@ -392,7 +409,9 @@ export class GardenSelectorComponent {
   }
 
   private isCurrent(item: SessionListItem): boolean {
-    return !!this.opts.currentFilePath && item.path === this.opts.currentFilePath;
+    if (!this.opts.currentFilePath) return false;
+    // Project aliases may give the same session a different directory in All scope.
+    return item.path === this.opts.currentFilePath || path.basename(item.path) === path.basename(this.opts.currentFilePath);
   }
 
   // ----- 删除 / 重命名 -----
@@ -531,10 +550,57 @@ export class GardenSelectorComponent {
     this.requestRender();
   }
 
+  // Hidden path alias maintenance; no background scan and no global chooser.
+  private async mergePaths(apply = false): Promise<void> {
+    if (!this.opts.pathMerge || this.mergingPaths || this.disposed) return;
+    if (this.scope !== "current") {
+      this.setStatus("目录合并仅支持 Current 作用域", "error", 3000);
+      this.requestRender();
+      return;
+    }
+    this.mergingPaths = true;
+    this.confirmingPathMerge = null;
+    this.setStatus(apply ? "正在合并目录…" : "正在检测当前目录…");
+    this.requestRender();
+    try {
+      if (apply) {
+        const message = await this.opts.pathMerge.apply();
+        if (this.disposed) return;
+        this.setStatus(message);
+      } else {
+        const preview = await this.opts.pathMerge.prepare();
+        if (this.disposed) return;
+        this.confirmingPathMerge = preview;
+        this.setStatus(preview ? null : "当前目录未发现可合并的路径", "info", 4000);
+      }
+    } catch (e) {
+      if (!this.disposed) this.setStatus(`目录合并: ${(e as Error).message}`, "error");
+    } finally {
+      this.mergingPaths = false;
+      if (!this.disposed) {
+        if (apply) {
+          // Invalidate in-flight All loads as well as the cache after mutation/rollback.
+          ++this.loadSeq.all;
+          this.loading.all = false;
+          this.items.all = null;
+          await this.loadScope("current");
+        }
+        this.requestRender();
+      }
+    }
+  }
+
   // ----- 输入分发 -----
 
   handleInput(data: string): void {
     const kb = this.keybindings;
+    if (this.mergingPaths) return;
+    if (this.confirmingPathMerge) {
+      if (kb.matches(data, "tui.select.confirm")) void this.mergePaths(true);
+      else if (kb.matches(data, "tui.select.cancel")) this.confirmingPathMerge = null;
+      this.requestRender();
+      return;
+    }
     // 删除确认态：吞掉所有其他键
     if (this.confirmingDelete) {
       if (kb.matches(data, "tui.select.confirm")) {
@@ -569,6 +635,11 @@ export class GardenSelectorComponent {
         return;
       }
       if (this.renameInput.handleInput(data)) this.requestRender();
+      return;
+    }
+    if (isCtrlLetter(data, "h")) {
+      this.showHelp = !this.showHelp;
+      this.requestRender();
       return;
     }
     if (kb.matches(data, "tui.select.up")) {
@@ -619,6 +690,9 @@ export class GardenSelectorComponent {
     } else if (this.opts.copyToClipboard && isCtrlLetter(data, "y")) {
       void this.doCopySubtree();
       return; // doCopySubtree 自渲染
+    } else if (this.opts.pathMerge && isAltLetter(data, "m")) {
+      void this.mergePaths();
+      return;
     } else if (this.opts.reverseSync && isCtrlLetter(data, "g")) {
       void this.doPrepareReverseSync();
       return;
@@ -678,6 +752,32 @@ export class GardenSelectorComponent {
     return this.theme.fg("muted", truncateToWidth(hints.join(" · "), width, "…"));
   }
 
+  private helpLines(width: number): string[] {
+    const commands = [
+      "↑/↓ 选择 · PageUp/PageDown 翻页 · Enter 切换 · Esc 取消",
+      'Tab 切换 Current/All · 输入搜索 · re:<正则> · "精确短语"',
+      "搜索编辑：←/→ · Home/End · Backspace/Delete · Ctrl+A/E/U/K/W",
+    ];
+    if (this.opts.onNewChild) commands.push("Ctrl+N 新建子会话");
+    if (this.opts.copyToClipboard) commands.push("Ctrl+Y 复制子树");
+    if (this.opts.renameSession) commands.push("Ctrl+R 改名（Enter 保存 / Esc 取消）");
+    if (this.opts.deleteSession) commands.push("Ctrl+D 删除（Enter 确认 / Esc 取消）");
+    if (this.opts.reverseSync) commands.push("Ctrl+G 反向同步 index.md（仅 Current）");
+    if (this.opts.pathMerge) commands.push("Alt+M 合并当前目录别名（仅 Current；Enter 确认 / Esc 取消）");
+    commands.push("Ctrl+H 展开 / 收起全部操作说明");
+    // Wrap rather than truncate: even narrow terminals must expose every command.
+    const lines: string[] = [];
+    for (const command of commands) {
+      let line = "";
+      for (const char of command) {
+        if (line && visibleWidth(line + char) > Math.max(2, width)) { lines.push(line); line = ""; }
+        line += char;
+      }
+      if (line) lines.push(line);
+    }
+    return lines.map((line) => this.theme.fg("muted", line));
+  }
+
   private renderRow(width: number, node: FlatNode, isSelected: boolean): string {
     const s = node.session;
     const isConfirming = this.confirmingDelete?.path === s.path;
@@ -733,6 +833,14 @@ export class GardenSelectorComponent {
     const lines: string[] = [];
     lines.push(this.border(width));
     lines.push(...this.renderHeader(width));
+    if (this.confirmingPathMerge) {
+      for (const line of this.confirmingPathMerge) {
+        lines.push(truncateToWidth(line, width, "…"));
+      }
+      lines.push(truncateToWidth("Enter 确认合并 · Esc 取消", width, "…"));
+      lines.push(this.border(width));
+      return lines;
+    }
     if (this.mode === "rename") {
       lines.push(...this.renderRename(width));
       lines.push(this.border(width));
@@ -743,11 +851,13 @@ export class GardenSelectorComponent {
     if (this.flat.length === 0) {
       lines.push(this.renderEmpty(width));
     } else {
+      const helpHeight = this.showHelp ? this.helpLines(width).length : 0;
+      const visible = Math.max(1, this.maxVisible - helpHeight);
       const startIndex = Math.max(
         0,
-        Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.flat.length - this.maxVisible),
+        Math.min(this.selectedIndex - Math.floor(visible / 2), this.flat.length - visible),
       );
-      const endIndex = Math.min(startIndex + this.maxVisible, this.flat.length);
+      const endIndex = Math.min(startIndex + visible, this.flat.length);
       for (let i = startIndex; i < endIndex; i++) {
         lines.push(this.renderRow(width, this.flat[i], i === this.selectedIndex));
       }
@@ -755,7 +865,10 @@ export class GardenSelectorComponent {
         lines.push(this.theme.fg("muted", `  (${this.selectedIndex + 1}/${this.flat.length})`));
       }
     }
-    lines.push(this.renderHint(width));
+    if (this.showHelp) {
+      if (this.statusMessage || this.confirmingDelete || this.confirmingReverseSync || this.queryError) lines.push(this.renderHint(width));
+      lines.push(...this.helpLines(width));
+    } else lines.push(this.renderHint(width));
     lines.push(this.border(width));
     return lines;
   }
