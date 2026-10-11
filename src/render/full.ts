@@ -133,7 +133,7 @@ function renderMessage(msg: AgentMessage, time: string, truncate: boolean): stri
     case "compactionSummary":
       return `## 🗜️ Compaction Summary · ${time}\n\n${msg.summary ?? ""}`;
     default:
-      return `## ❓ 未知消息 (${(msg as any).role}) · ${time}\n\n${fence(JSON.stringify(msg, null, 2), "json")}`;
+      return `${(msg as any).role === "system" ? "## ⚙️ System" : `## ❓ 未知消息 (${(msg as any).role})`} · ${time}\n\n${fence(JSON.stringify(msg, null, 2), "json")}`;
   }
 }
 
