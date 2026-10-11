@@ -69,12 +69,12 @@ test("withEnv: async fn 全程保持补丁，结束后还原", async () => {
 });
 
 test("readConfig: 默认值 / 停用 / live 间隔 / 选择器全文开关 / 导出级别", () => {
-  assert.deepEqual(readConfig({}), { enabled: true, liveIntervalMs: 60_000, selectorFullText: true, levels: ["l1", "l3"] });
-  assert.deepEqual(readConfig({ PI_GARDEN: "0" }), { enabled: false, liveIntervalMs: 60_000, selectorFullText: true, levels: ["l1", "l3"] });
+  assert.deepEqual(readConfig({}), { enabled: true, liveIntervalMs: 5_000, selectorFullText: true, levels: ["l1", "l3"] });
+  assert.deepEqual(readConfig({ PI_GARDEN: "0" }), { enabled: false, liveIntervalMs: 5_000, selectorFullText: true, levels: ["l1", "l3"] });
   assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "0" }), { enabled: true, liveIntervalMs: 0, selectorFullText: true, levels: ["l1", "l3"] });
   assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "2.5" }), { enabled: true, liveIntervalMs: 2500, selectorFullText: true, levels: ["l1", "l3"] });
   assert.deepEqual(readConfig({ PI_GARDEN_LIVE_INTERVAL_S: "abc" }), { enabled: true, liveIntervalMs: 0, selectorFullText: true, levels: ["l1", "l3"] });
-  assert.deepEqual(readConfig({ PI_GARDEN_SELECTOR_FULLTEXT: "0" }), { enabled: true, liveIntervalMs: 60_000, selectorFullText: false, levels: ["l1", "l3"] });
+  assert.deepEqual(readConfig({ PI_GARDEN_SELECTOR_FULLTEXT: "0" }), { enabled: true, liveIntervalMs: 5_000, selectorFullText: false, levels: ["l1", "l3"] });
   // PI_GARDEN_LEVELS：大小写不敏感、去重、保序；全部非法回退默认
   assert.deepEqual(readConfig({ PI_GARDEN_LEVELS: "l0,l2" }).levels, ["l0", "l2"]);
   assert.deepEqual(readConfig({ PI_GARDEN_LEVELS: " L3, l1 ,l3 " }).levels, ["l3", "l1"]);
@@ -217,7 +217,7 @@ test("扩展: agent_settled live 防抖", async () => {
   let now = 1_000_000_000_000;
   Date.now = () => now;
   try {
-    await withEnv({ PI_GARDEN_LIVE_INTERVAL_S: "60" }, async () => {
+    await withEnv({ PI_GARDEN_LIVE_INTERVAL_S: undefined }, async () => {
       const { pi, handlers } = mockPi();
       garden(pi as any);
       const ctx = mockCtx(sessionFile, []);
@@ -228,11 +228,11 @@ test("扩展: agent_settled live 防抖", async () => {
       assert.ok(existsSync(l1));
 
       unlinkSync(l1);
-      now += 10_000; // +10s < 60s：防抖跳过
+      now += 1_000; // +1s < 5s：防抖跳过
       await settle();
       assert.ok(!existsSync(l1), "间隔内不应重复转换");
 
-      now += 61_000; // +61s > 60s：再次转换
+      now += 5_000; // +5s，总间隔 > 5s：再次转换
       await settle();
       assert.ok(existsSync(l1));
     });

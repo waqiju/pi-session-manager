@@ -5,7 +5,7 @@
  *   默认只导 l1/l3，PI_GARDEN_LEVELS 配置）。
  *   渲染核心在 ../src（CLI 同源），这里只做事件接线：
  *     session_start    → 补漏（crash / kill 后恢复）
- *     agent_settled    → live 转换（防抖，默认 60s，PI_GARDEN_LIVE_INTERVAL_S 调整，0 关闭）
+ *     agent_settled    → live 转换（防抖，默认 5s，PI_GARDEN_LIVE_INTERVAL_S 调整，0 关闭）
  *     session_compact  → compaction 章节边界
  *     session_shutdown → 终态保证（quit / new / resume / fork / reload 都会触发）
  *     session_info_changed → metadata 变更（/name 改名），更新文件名 slug
@@ -28,7 +28,7 @@
  *   PI_GARDEN=0                     完全停用本扩展
  *   PI_GARDEN_LEVELS=l1,l3          导出级别（逗号分隔，子集 l0/l1/l2/l3；默认 l1,l3。
  *                                   l0 与源 jsonl 冗余、l2 语料与 l3 重叠，按需再导）
- *   PI_GARDEN_LIVE_INTERVAL_S=60    live 转换最小间隔（秒，可小数）；0 = 关闭 live 触发
+ *   PI_GARDEN_LIVE_INTERVAL_S=5    live 转换最小间隔（秒，可小数）；0 = 关闭 live 触发
  *   PI_GARDEN_OPEN_CMD              自定义打开命令（空格切分；{file} 占位，缺省追加为末参）
  *   PI_GARDEN_SELECTOR_FULLTEXT=1   /garden 选择器用 garden md 正文回填全文搜索语料；
  *                                   0 = 关闭（退回只搜 id/name/cwd）
@@ -71,7 +71,7 @@ export interface GardenConfig {
 
 export function readConfig(env: NodeJS.ProcessEnv): GardenConfig {
   const off = (env.PI_GARDEN ?? "").trim() === "0";
-  let liveIntervalMs = 60_000;
+  let liveIntervalMs = 5_000;
   const raw = (env.PI_GARDEN_LIVE_INTERVAL_S ?? "").trim();
   if (raw !== "") {
     const n = Number(raw);

@@ -155,7 +155,7 @@ Mac 终端需将 Option 配置为 Alt/Meta。旧 Ctrl+L 不再绑定。
 |------|------|------|
 | `PI_GARDEN` | `1` | `0` = 完全停用扩展（不注册任何事件/命令） |
 | `PI_GARDEN_LEVELS` | `l1,l3` | 导出级别（逗号分隔，子集 `l0/l1/l2/l3`，大小写不敏感；全部非法回退默认）。l0 与源 jsonl 冗余、l2 语料与 l3 重叠，默认不导；旧配置产出的其他级别文件按归档语义保留，不会自动清理 |
-| `PI_GARDEN_LIVE_INTERVAL_S` | `60` | live 触发最小间隔（秒，可小数）；`0` = 关闭 live 触发 |
+| `PI_GARDEN_LIVE_INTERVAL_S` | `5` | live 触发最小间隔（秒，可小数）；`0` = 关闭 live 触发 |
 | `PI_GARDEN_OPEN_MODE` | `auto` | auto：检测 SSH_CONNECTION/SSH_CLIENT 后输出网页预览 URL，否则本地打开；web/local 强制覆盖（tmux 环境继承可能导致自动检测不准） |
 | `PI_GARDEN_PREVIEW_PORT` | `13322` | 网页预览固定端口（1–65535）；客户端需 SSH -L 转发同一端口，冲突明确报错，不自动换端口 |
 | `PI_GARDEN_OPEN_CMD` | 平台默认 | 仅本地打开模式生效。 自定义打开命令；空格切分，含 `{file}` 替换否则追加为末参。平台默认：WSL `wslpath -w` + `cmd.exe /c start`，Linux `xdg-open`，macOS `open` |
