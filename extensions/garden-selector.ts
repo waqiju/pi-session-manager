@@ -786,7 +786,7 @@ export class GardenSelectorComponent {
       const color = this.statusMessage.type === "error" ? "error" : "accent";
       return this.theme.fg(color, truncateToWidth(this.statusMessage.message, width, "…"));
     }
-    const hints = ["Ctrl+←/→ 折叠/展开", 'Tab scope · re:<正则> · "精确短语"', "Enter 切换 · Esc 取消"];
+    const hints = ['Tab scope · re:<正则> · "精确短语"', "Enter 切换 · Esc 取消"];
     if (this.opts.onNewChild) hints.push("Ctrl+N 新建子会话");
     if (this.opts.copyToClipboard) hints.push("Ctrl+Y 复制子树");
     if (this.opts.renameSession) hints.push("Ctrl+R 改名");
@@ -826,21 +826,21 @@ export class GardenSelectorComponent {
     const s = node.session;
     const isConfirming = this.confirmingDelete?.path === s.path;
     const isCurrent = this.isCurrent(s);
-    const prefix = treePrefix(node) + (node.descendantCount > 0 ? (node.collapsed ? "▸ " : "▾ ") : "");
+    const prefix = treePrefix(node);
     const displayText = (s.name ?? s.firstMessage).replace(/[\x00-\x1f\x7f]/g, " ").trim();
     let rightPart = `${s.messageCount} ${formatAge(s.modified)}`;
     if (this.scope === "all" && s.cwd) rightPart = `${shortenPath(s.cwd)} ${rightPart}`;
     const cursor = isSelected ? this.theme.fg("accent", "› ") : "  ";
-    const hidden = node.collapsed ? ` (+${node.descendantCount})` : "";
-    const availableForMsg = Math.max(0, width - 2 - visibleWidth(prefix) - visibleWidth(rightPart) - visibleWidth(hidden) - 2);
-    const truncatedMsg = truncateToWidth(displayText, availableForMsg, "…") + hidden;
+    const foldSuffix = node.collapsed ? ` ◂ (+${node.descendantCount})` : "";
+    const availableForMsg = Math.max(0, width - 2 - visibleWidth(prefix) - visibleWidth(rightPart) - visibleWidth(foldSuffix) - 2);
+    const truncatedMsg = truncateToWidth(displayText, availableForMsg, "…");
     let msgColor: string | null = null;
     if (isConfirming) msgColor = "error";
     else if (isCurrent) msgColor = "accent";
     else if (s.name) msgColor = "warning";
     let styledMsg = msgColor ? this.theme.fg(msgColor, truncatedMsg) : truncatedMsg;
     if (isSelected) styledMsg = this.theme.bold(styledMsg);
-    const leftPart = cursor + this.theme.fg("dim", prefix) + styledMsg;
+    const leftPart = cursor + this.theme.fg("dim", prefix) + styledMsg + this.theme.fg("dim", foldSuffix);
     const spacing = Math.max(1, width - visibleWidth(leftPart) - visibleWidth(rightPart));
     const styledRight = this.theme.fg(isConfirming ? "error" : "dim", rightPart);
     let line = leftPart + " ".repeat(spacing) + styledRight;

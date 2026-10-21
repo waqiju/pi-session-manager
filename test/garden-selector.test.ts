@@ -142,12 +142,12 @@ test("选择器: 折叠/父子导航/搜索/别名 scope/复制/改名/删除", 
     assert.match(plain(h.c), /隐藏后代/);
     right(); // child
     left(); // fold child
-    assert.match(plain(h.c), /▸ 分支 \(\+1\)/);
+    assert.match(plain(h.c), /分支 ◂ \(\+1\)/);
     assert.doesNotMatch(plain(h.c), /隐藏后代/);
     assert.equal(selected(), child.path);
     left(); // parent
     left(); // fold root
-    assert.match(plain(h.c), /▸ 根 \(\+3\)/);
+    assert.match(plain(h.c), /根 ◂ \(\+3\)/);
     h.c.handleInput("\x19"); // full copy, not visible projection
     await flush();
     assert.match(h.copied[0], /隐藏后代/);
@@ -166,12 +166,12 @@ test("选择器: 折叠/父子导航/搜索/别名 scope/复制/改名/删除", 
     assert.equal(selected(), child.path);
     assert.doesNotMatch(plain(h.c), /隐藏后代/);
     h.c.handleInput("\t"); await flush();
-    assert.match(plain(h.c), /▸ 分支 \(\+1\)/);
+    assert.match(plain(h.c), /分支 ◂ \(\+1\)/);
     assert.equal(selected(), child.path.replace("/tmp/x/", "/alias/"));
     h.c.handleInput("\t");
     h.c.handleInput("\x12"); h.c.handleInput("\x15"); h.c.handleInput("新名"); h.c.handleInput("\r");
     await flush();
-    assert.match(plain(h.c), /▸ 新名 \(\+1\)/);
+    assert.match(plain(h.c), /新名 ◂ \(\+1\)/);
     for (const width of [20, 40, 100]) {
       assert.ok(h.c.render(width).every((line) => visibleWidth(line) <= width));
     }
@@ -197,9 +197,39 @@ test("选择器: 折叠后翻页只选可见节点；重开不保留折叠；空
     for (const key of ["\x1b[1;5D", "\x1b[1;5C", "\x1b[B", "\r"]) empty.c.handleInput(key);
     assert.deepEqual(empty.selected, []);
     const reopened = harness([root, ...children]); await flush();
-    assert.match(plain(reopened.c), /▾ 根/);
+    assert.doesNotMatch(plain(reopened.c), /[▾◂]/);
+    assert.match(plain(reopened.c), /消息/);
     reopened.c.dispose();
   } finally { h.c.dispose(); empty.c.dispose(); }
+});
+
+test("选择器: 折叠标记置于名称后且计数同灰色；同级首字对齐；快捷键仅帮助显示", async () => {
+  const root = makeItem({ mdBase: "visual-root", name: "根节点" });
+  const branch = makeItem({ mdBase: "visual-branch", name: "分支节点", parentSessionPath: root.path });
+  const child = makeItem({ mdBase: "visual-child", name: "后代", parentSessionPath: branch.path });
+  const leaf = makeItem({ mdBase: "visual-leaf", name: "叶子节点", parentSessionPath: root.path });
+  const h = harness([root, branch, child, leaf], undefined, {
+    theme: {
+      ...stubTheme,
+      fg: (color: string, text: string) => `\x1b[${color === "dim" ? "2" : "33"}m${text}\x1b[0m`,
+    },
+  });
+  await flush();
+  try {
+    const expanded = plain(h.c, 180);
+    assert.match(expanded, /分支节点/);
+    assert.doesNotMatch(expanded, /[▾◂]/, "已展开分支不显示箭头");
+    const rows = expanded.split("\n");
+    assert.equal(rows.find((s) => s.includes("分支节点"))!.indexOf("分支节点"),
+      rows.find((s) => s.includes("叶子节点"))!.indexOf("叶子节点"));
+    assert.doesNotMatch(expanded, /Ctrl\+←/);
+    h.c.handleInput("\x1b[B"); h.c.handleInput("\x1b[1;5D");
+    const raw = h.c.render(180).join("\n");
+    assert.ok(raw.includes("\x1b[2m ◂ (+1)\x1b[0m"), "箭头与计数在同一个灰色片段中");
+    assert.match(stripAnsi(raw), /分支节点 ◂ \(\+1\)/);
+    h.c.handleInput("\x08");
+    assert.match(plain(h.c, 180), /Ctrl\+← 折叠/);
+  } finally { h.c.dispose(); }
 });
 
 // ---------- LineInput ----------
