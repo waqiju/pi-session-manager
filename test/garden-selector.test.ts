@@ -26,6 +26,8 @@ const KEY_MAP: Record<string, string> = {
   "\x1b": "tui.select.cancel",
   "\x1b[A": "tui.select.up",
   "\x1b[B": "tui.select.down",
+  "\x1b[1;5D": "app.tree.foldOrUp",
+  "\x1b[1;5C": "app.tree.unfoldOrDown",
   "\x1b[5~": "tui.select.pageUp",
   "\x1b[6~": "tui.select.pageDown",
   "\t": "tui.input.tab",
@@ -124,6 +126,81 @@ function plain(c: GardenSelectorComponent, width = 100): string {
     .map((l) => stripAnsi(l))
     .join("\n");
 }
+
+test("选择器: 折叠/父子导航/搜索/别名 scope/复制/改名/删除", async () => {
+  const root = makeItem({ mdBase: "root", name: "根" });
+  const child = makeItem({ mdBase: "child", name: "分支", parentSessionPath: root.path });
+  const leaf = makeItem({ mdBase: "leaf", name: "隐藏后代", parentSessionPath: child.path });
+  const sibling = makeItem({ mdBase: "sibling", name: "兄弟", parentSessionPath: root.path });
+  const items = [root, child, leaf, sibling];
+  const h = harness(items, items.map((s) => ({ ...s, path: s.path.replace("/tmp/x/", "/alias/") })));
+  const left = () => h.c.handleInput("\x1b[1;5D");
+  const right = () => h.c.handleInput("\x1b[1;5C");
+  const selected = () => { h.c.handleInput("\r"); return h.selected.at(-1); };
+  await flush();
+  try {
+    assert.match(plain(h.c), /隐藏后代/);
+    right(); // child
+    left(); // fold child
+    assert.match(plain(h.c), /▸ 分支 \(\+1\)/);
+    assert.doesNotMatch(plain(h.c), /隐藏后代/);
+    assert.equal(selected(), child.path);
+    left(); // parent
+    left(); // fold root
+    assert.match(plain(h.c), /▸ 根 \(\+3\)/);
+    h.c.handleInput("\x19"); // full copy, not visible projection
+    await flush();
+    assert.match(h.copied[0], /隐藏后代/);
+    right(); // root expanded, child remains folded
+    assert.doesNotMatch(plain(h.c), /隐藏后代/);
+    right(); right(); right(); // child, expand, leaf
+    assert.equal(selected(), leaf.path);
+    right(); // leaf noop
+    assert.equal(selected(), leaf.path);
+    left(); left(); // child then fold
+    h.c.handleInput("隐藏后代");
+    assert.match(plain(h.c), /隐藏后代/);
+    left(); right(); // search does not change collapse
+    assert.equal(selected(), leaf.path);
+    h.c.handleInput("\x15"); // clear query -> visible ancestor
+    assert.equal(selected(), child.path);
+    assert.doesNotMatch(plain(h.c), /隐藏后代/);
+    h.c.handleInput("\t"); await flush();
+    assert.match(plain(h.c), /▸ 分支 \(\+1\)/);
+    assert.equal(selected(), child.path.replace("/tmp/x/", "/alias/"));
+    h.c.handleInput("\t");
+    h.c.handleInput("\x12"); h.c.handleInput("\x15"); h.c.handleInput("新名"); h.c.handleInput("\r");
+    await flush();
+    assert.match(plain(h.c), /▸ 新名 \(\+1\)/);
+    for (const width of [20, 40, 100]) {
+      assert.ok(h.c.render(width).every((line) => visibleWidth(line) <= width));
+    }
+    h.c.handleInput("\x04"); h.c.handleInput("\r"); await flush();
+    assert.deepEqual(h.deleted, [child.path]);
+    assert.match(plain(h.c), /隐藏后代/, "删父后孤儿仍可见");
+  } finally { h.c.dispose(); }
+});
+
+test("选择器: 折叠后翻页只选可见节点；重开不保留折叠；空树安全", async () => {
+  const root = makeItem({ mdBase: "page-root", name: "根" });
+  const children = Array.from({ length: 12 }, (_, i) => makeItem({ mdBase: `page-${i}`, parentSessionPath: root.path }));
+  const tail = makeItem({ mdBase: "tail", name: "尾" });
+  const h = harness([root, ...children, tail], undefined, { maxVisible: 3 });
+  const empty = harness([]);
+  await flush();
+  try {
+    h.c.handleInput("\x1b[1;5D");
+    h.c.handleInput("\x1b[6~"); h.c.handleInput("\r");
+    assert.equal(h.selected.at(-1), tail.path);
+    h.c.handleInput("\x1b[5~"); h.c.handleInput("\r");
+    assert.equal(h.selected.at(-1), root.path);
+    for (const key of ["\x1b[1;5D", "\x1b[1;5C", "\x1b[B", "\r"]) empty.c.handleInput(key);
+    assert.deepEqual(empty.selected, []);
+    const reopened = harness([root, ...children]); await flush();
+    assert.match(plain(reopened.c), /▾ 根/);
+    reopened.c.dispose();
+  } finally { h.c.dispose(); empty.c.dispose(); }
+});
 
 // ---------- LineInput ----------
 
@@ -457,7 +534,7 @@ test("选择器: Ctrl+Y 复制子树（叶子 / 整树 / 搜索态 / 失败 / �
   // 叶子：默认选中 other（最新排第一）→ 只复制自身
   const h = harness([root, child, grand, other]);
   await flush();
-  assert.ok(plain(h.c).includes("Ctrl+Y 复制子树"), "hint 常驻");
+  assert.ok(plain(h.c, 180).includes("Ctrl+Y 复制子树"), "足够宽时 hint 常驻");
   h.c.handleInput("\x19"); // ctrl+y legacy
   assert.equal(h.copied.length, 1);
   assert.ok(h.copied[0].startsWith("🗂️ 关联历史会话 (1 条)"), h.copied[0]);

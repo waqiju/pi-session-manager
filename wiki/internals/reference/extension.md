@@ -90,12 +90,28 @@ SSH/MOSH 下发送 OSC 52 到客户端终端，无客户端助手。选择器复
 应用回 sessions——先一一对账（数量 + id），确认条汇总 N 换父 · M 删除 · K 归档后执行；
 归档挪 jsonl 到 `1_archived/`（header 加 archivedTreePath/archivedAt，pi 容忍额外字段）。
 语义与安全前提见 [reverse-sync](../concepts/reverse-sync.md)。
-自有快捷键匹配走 `isCtrlLetter`（garden-selector.ts）：直接认物理键，legacy 控制字符 /
+自有字母快捷键匹配走 `isCtrlLetter`（garden-selector.ts）：直接认物理键，legacy 控制字符 /
 Kitty CSI-u / modifyOtherKeys 三编码全覆盖（pi-tui 会协商 Kitty flags=7，终端编码不保证
 是 legacy）；**不借** `kb.matches` 的 action 名——上游改绑默认键已坑过一次，且 pi 的
 KeybindingsManager 不认扩展自定义 action（用户 keybindings.json 无法补绑）。
 裁剪：sort 三模式循环、named-only 过滤、path 显示开关（threaded + 搜索已覆盖）。
 回退：`PI_GARDEN_SELECTOR=builtin` 可切回官方组件（对比/排查用，drvfs 上会卡）。
+
+### 会话树折叠
+
+空搜索时支持目录树式导航，复用 Pi 的 `app.tree.foldOrUp` / `app.tree.unfoldOrDown`
+动作（默认 Ctrl+Left/Right，也支持 Pi 配置的替代键；不同于内建消息树的分支段跳转）：
+
+- Ctrl+Left：折叠当前已展开的子树；叶子或已折叠节点则跳到父节点，根节点不动。
+- Ctrl+Right：展开当前折叠节点；已展开则进入首个子节点，叶子不动。
+- `▾` / `▸` 表示展开 / 折叠；`(+N)` 是隐藏的后代会话总数。
+- 默认全部展开；本次打开内保留嵌套折叠状态，切 scope、搜索、改名和重载不会重置；
+  关闭后不持久化。标识使用 jsonl basename，兼容目录别名。
+- 搜索始终覆盖全部会话，结果平铺且不执行折叠；清空搜索恢复折叠状态，若选中结果被隐藏，
+  选中其最近可见祖先。上下移动/翻页只访问可见行。
+- Ctrl+Y 仍复制完整子树（含隐藏后代）；Ctrl+D 仍只删除所选会话。
+- `src/session-tree.ts` 的 `visibleSessionTree` 仅用于选择器；完整展开函数、index.md、
+  Markdown 导出与父子关系不变，不需重新导出。
 
 ### 隐藏帮助（Ctrl+H）
 

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { SessionListItem } from "../src/session-list.ts";
 import {
   basenameAny,
+  visibleSessionTree,
   buildSessionTree,
   filterAndSortSessions,
   flattenSessionTree,
@@ -86,6 +87,33 @@ test("flattenSessionTree: 深度/兄弟/祖先延续线", () => {
     ["/s/ddd.jsonl", 2, true],
     ["/s/ccc.jsonl", 1, true],
   ]);
+});
+
+test("visibleSessionTree: 后代计数/父定位/嵌套折叠/孤儿与环", () => {
+  const a = makeItem({ path: "/s/a.jsonl" });
+  const b = makeItem({ path: "/s/b.jsonl", parentSessionPath: a.path });
+  const c = makeItem({ path: "/s/c.jsonl", parentSessionPath: b.path });
+  const d = makeItem({ path: "/s/d.jsonl", parentSessionPath: a.path });
+  const roots = buildSessionTree([a, b, c, d]);
+  const collapsed = new Set(["b.jsonl"]);
+  const visible = visibleSessionTree(roots, collapsed);
+  assert.deepEqual(visible.map((n) => [n.session.id, n.descendantCount, n.parentKey, n.collapsed]), [
+    [a.id, 3, undefined, false], [b.id, 1, "a.jsonl", true], [d.id, 0, "a.jsonl", false],
+  ]);
+  collapsed.add("a.jsonl");
+  assert.equal(visibleSessionTree(roots, collapsed).length, 1);
+  collapsed.delete("a.jsonl");
+  assert.equal(visibleSessionTree(roots, collapsed).length, 3);
+  assert.equal(flattenSessionTree(roots).length, 4, "完整展开不受影响");
+  assert.deepEqual(visibleSessionTree([], collapsed), []);
+  const cycle = buildSessionTree([
+    makeItem({ path: "/s/x.jsonl", parentSessionPath: "/s/y.jsonl" }),
+    makeItem({ path: "/s/y.jsonl", parentSessionPath: "/s/x.jsonl" }),
+  ]);
+  const full = visibleSessionTree(cycle, new Set());
+  assert.equal(full.length, 2);
+  assert.equal(visibleSessionTree(cycle, new Set([basenameAny(full[0].session.path)])).length, 1);
+  assert.equal(visibleSessionTree(buildSessionTree([c]), collapsed)[0].parentKey, undefined);
 });
 
 test("parseSearchQuery: 空 / fuzzy / 短语 / 正则 / 引号不配对", () => {

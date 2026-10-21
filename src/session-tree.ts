@@ -106,6 +106,38 @@ export function flattenSessionTree(roots: TreeNode[]): FlatNode[] {
   return result;
 }
 
+/** 选择器专用投影；完整 flatten 的消费者（索引/复制）不受折叠影响。 */
+export interface VisibleFlatNode extends FlatNode {
+  parentKey?: string;
+  descendantCount: number;
+  collapsed: boolean;
+}
+
+export function visibleSessionTree(roots: TreeNode[], collapsed: ReadonlySet<string>): VisibleFlatNode[] {
+  // 先沿完整、已去环的前序列表计算父节点与子树大小，避免折叠影响环兜底行为。
+  const full: VisibleFlatNode[] = flattenSessionTree(roots).map((node) => ({
+    ...node, descendantCount: 0, collapsed: false,
+  }));
+  const stack: number[] = [];
+  for (let i = 0; i <= full.length; i++) {
+    while (stack.length && (i === full.length || full[stack.at(-1)!].depth >= full[i].depth)) {
+      const index = stack.pop()!;
+      full[index].descendantCount = i - index - 1;
+    }
+    if (i === full.length) break;
+    if (stack.length) full[i].parentKey = basenameAny(full[stack.at(-1)!].session.path);
+    stack.push(i);
+  }
+  const visible: VisibleFlatNode[] = [];
+  for (let i = 0; i < full.length; i++) {
+    const node = full[i];
+    node.collapsed = node.descendantCount > 0 && collapsed.has(basenameAny(node.session.path));
+    visible.push(node);
+    if (node.collapsed) i += node.descendantCount;
+  }
+  return visible;
+}
+
 // ---------- 搜索（语法对齐内建：fuzzy token / "phrase" 精确 / re: 正则） ----------
 
 export interface QueryToken {

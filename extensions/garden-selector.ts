@@ -22,12 +22,15 @@ import { pickHighestLevelFile } from "../src/open.ts";
 import type { ReverseSyncPreview } from "../src/reverse-sync.ts";
 import type { SessionListItem } from "../src/session-list.ts";
 import {
+  basenameAny,
   buildSessionTree,
+  visibleSessionTree,
   filterAndSortSessions,
   flattenSessionTree,
   parseSearchQuery,
   type FlatNode,
   type TreeNode,
+  type VisibleFlatNode,
 } from "../src/session-tree.ts";
 import { truncateToWidth, visibleWidth } from "../src/textwidth.ts";
 import { buildSubtreeCopyText, COPY_SUBTREE_MAX } from "./garden-clipboard.ts";
@@ -295,7 +298,9 @@ export class GardenSelectorComponent {
   private mergingPaths = false;
   private confirmingDelete: SessionListItem | null = null;
   private confirmingReverseSync: ReverseSyncPreview | null = null;
-  private flat: FlatNode[] = [];
+  private flat: VisibleFlatNode[] = [];
+  /** JSONL basename 稳定跨目录别名/改名；只在本次打开期间保留。 */
+  private collapsed = new Set<string>();
   private selectedIndex = 0;
   private statusMessage: { type: "info" | "error"; message: string } | null = null;
   private statusTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -374,10 +379,20 @@ export class GardenSelectorComponent {
   /** 按当前 scope + 搜索词重建显示列表（空查询 = fork 树，非空 = 平铺搜索结果） */
   private refilter(): void {
     const items = this.items[this.scope] ?? [];
+    let selectedKey = this.flat[this.selectedIndex] && basenameAny(this.flat[this.selectedIndex].session.path);
     const query = this.searchInput.getValue().trim();
     this.queryError = null;
     if (!query) {
-      this.flat = flattenSessionTree(buildSessionTree(items));
+      const roots = buildSessionTree(items);
+      this.flat = visibleSessionTree(roots, this.collapsed);
+      // 搜索命中的后代可能被折叠：清空搜索后选最近可见祖先，不暗中展开。
+      if (selectedKey && !this.flat.some((n) => basenameAny(n.session.path) === selectedKey)) {
+        const parents = new Map(visibleSessionTree(roots, new Set()).map((n) => [basenameAny(n.session.path), n.parentKey]));
+        while (selectedKey && parents.has(selectedKey)) {
+          selectedKey = parents.get(selectedKey);
+          if (this.flat.some((n) => basenameAny(n.session.path) === selectedKey)) break;
+        }
+      }
     } else {
       const parsed = parseSearchQuery(query);
       if (parsed.mode === "regex" && parsed.error) this.queryError = parsed.error;
@@ -386,9 +401,33 @@ export class GardenSelectorComponent {
         depth: 0,
         isLast: true,
         ancestorContinues: [],
+        descendantCount: 0,
+        collapsed: false,
       }));
     }
-    this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.flat.length - 1));
+    const preserved = this.flat.findIndex((n) => basenameAny(n.session.path) === selectedKey);
+    this.selectedIndex = preserved >= 0 ? preserved : Math.max(0, Math.min(this.selectedIndex, this.flat.length - 1));
+  }
+
+  private navigateTree(expand: boolean): void {
+    if (this.searchInput.getValue().trim()) return;
+    const node = this.flat[this.selectedIndex];
+    if (!node) return;
+    const key = basenameAny(node.session.path);
+    if (expand) {
+      if (node.collapsed) {
+        this.collapsed.delete(key);
+        this.refilter();
+      } else if (node.descendantCount > 0) {
+        this.selectedIndex++;
+      }
+    } else if (node.descendantCount > 0 && !node.collapsed) {
+      this.collapsed.add(key);
+      this.refilter();
+    } else if (node.parentKey) {
+      const parent = this.flat.findIndex((n) => basenameAny(n.session.path) === node.parentKey);
+      if (parent >= 0) this.selectedIndex = parent;
+    }
   }
 
   // ----- 状态与提示 -----
@@ -642,7 +681,11 @@ export class GardenSelectorComponent {
       this.requestRender();
       return;
     }
-    if (kb.matches(data, "tui.select.up")) {
+    if (kb.matches(data, "app.tree.foldOrUp")) {
+      this.navigateTree(false);
+    } else if (kb.matches(data, "app.tree.unfoldOrDown")) {
+      this.navigateTree(true);
+    } else if (kb.matches(data, "tui.select.up")) {
       this.selectedIndex = Math.max(0, this.selectedIndex - 1);
     } else if (kb.matches(data, "tui.select.down")) {
       this.selectedIndex = Math.min(this.flat.length - 1, this.selectedIndex + 1);
@@ -743,7 +786,7 @@ export class GardenSelectorComponent {
       const color = this.statusMessage.type === "error" ? "error" : "accent";
       return this.theme.fg(color, truncateToWidth(this.statusMessage.message, width, "…"));
     }
-    const hints = ['Tab scope · re:<正则> · "精确短语"', "Enter 切换 · Esc 取消"];
+    const hints = ["Ctrl+←/→ 折叠/展开", 'Tab scope · re:<正则> · "精确短语"', "Enter 切换 · Esc 取消"];
     if (this.opts.onNewChild) hints.push("Ctrl+N 新建子会话");
     if (this.opts.copyToClipboard) hints.push("Ctrl+Y 复制子树");
     if (this.opts.renameSession) hints.push("Ctrl+R 改名");
@@ -755,6 +798,7 @@ export class GardenSelectorComponent {
   private helpLines(width: number): string[] {
     const commands = [
       "↑/↓ 选择 · PageUp/PageDown 翻页 · Enter 切换 · Esc 取消",
+      "Ctrl+← 折叠 / 到父节点 · Ctrl+→ 展开 / 到首个子节点（仅空搜索）",
       'Tab 切换 Current/All · 输入搜索 · re:<正则> · "精确短语"',
       "搜索编辑：←/→ · Home/End · Backspace/Delete · Ctrl+A/E/U/K/W",
     ];
@@ -778,17 +822,18 @@ export class GardenSelectorComponent {
     return lines.map((line) => this.theme.fg("muted", line));
   }
 
-  private renderRow(width: number, node: FlatNode, isSelected: boolean): string {
+  private renderRow(width: number, node: VisibleFlatNode, isSelected: boolean): string {
     const s = node.session;
     const isConfirming = this.confirmingDelete?.path === s.path;
     const isCurrent = this.isCurrent(s);
-    const prefix = treePrefix(node);
+    const prefix = treePrefix(node) + (node.descendantCount > 0 ? (node.collapsed ? "▸ " : "▾ ") : "");
     const displayText = (s.name ?? s.firstMessage).replace(/[\x00-\x1f\x7f]/g, " ").trim();
     let rightPart = `${s.messageCount} ${formatAge(s.modified)}`;
     if (this.scope === "all" && s.cwd) rightPart = `${shortenPath(s.cwd)} ${rightPart}`;
     const cursor = isSelected ? this.theme.fg("accent", "› ") : "  ";
-    const availableForMsg = Math.max(10, width - 2 - visibleWidth(prefix) - visibleWidth(rightPart) - 2);
-    const truncatedMsg = truncateToWidth(displayText, availableForMsg, "…");
+    const hidden = node.collapsed ? ` (+${node.descendantCount})` : "";
+    const availableForMsg = Math.max(0, width - 2 - visibleWidth(prefix) - visibleWidth(rightPart) - visibleWidth(hidden) - 2);
+    const truncatedMsg = truncateToWidth(displayText, availableForMsg, "…") + hidden;
     let msgColor: string | null = null;
     if (isConfirming) msgColor = "error";
     else if (isCurrent) msgColor = "accent";
