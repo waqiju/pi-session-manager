@@ -32,7 +32,7 @@ import {
   type TreeNode,
   type VisibleFlatNode,
 } from "../src/session-tree.ts";
-import { truncateToWidth, visibleWidth } from "../src/textwidth.ts";
+import { getGraphemeSegmenter, truncateToWidth, visibleWidth } from "../src/textwidth.ts";
 import { buildSubtreeCopyText, COPY_SUBTREE_MAX } from "./garden-clipboard.ts";
 
 /** pi-tui 的硬件光标定位标记（IME 用）；内联以避免运行时依赖 pi 包 */
@@ -119,7 +119,7 @@ function treePrefix(node: FlatNode): string {
 
 /**
  * 单行文本编辑：可打印字符插入（含粘贴整段）、backspace/delete、左右/Home/End、
- * ctrl+a/e/u/k/w。按 code point 操作（不劈开代理对）。不处理 escape 序列以外的
+ * ctrl+a/e/u/k/w。按字素簇操作（不劈开组合字符或 emoji）。不处理 escape 序列以外的
  * 控制字符；不认识的一律不消费（交回调用方）。
  *
  * 粘贴：pi 终端层开启 bracketed paste（\x1b[?2004h）并把粘贴重包装为
@@ -136,7 +136,7 @@ export class LineInput {
   }
 
   setValue(v: string): void {
-    this.chars = Array.from(v);
+    this.chars = Array.from(getGraphemeSegmenter().segment(v), ({ segment }) => segment);
     this.cursor = this.chars.length;
   }
 
@@ -200,8 +200,14 @@ export class LineInput {
     // 可打印输入（含中文等宽字符、粘贴的整段文本）：剥掉控制字符，换行变空格
     const cleaned = data.replace(/[\r\n]+/g, " ").replace(/[\x00-\x1f\x7f]/g, "");
     if (!cleaned) return false;
-    this.chars.splice(this.cursor, 0, ...Array.from(cleaned));
-    this.cursor += Array.from(cleaned).length;
+    const before = this.chars.slice(0, this.cursor).join("") + cleaned;
+    const after = this.chars.slice(this.cursor).join("");
+    this.setValue(before + after);
+    let offset = 0;
+    this.cursor = 0;
+    while (this.cursor < this.chars.length && offset < before.length) {
+      offset += this.chars[this.cursor++].length;
+    }
     return true;
   }
 
@@ -216,22 +222,28 @@ export class LineInput {
    * （2026-09-15 rename 无光标事故的根因：当时只嵌了 marker）。
    */
   render(width: number, prompt: string, focused = true): string {
-    const budget = Math.max(1, width - visibleWidth(prompt));
-    const before = this.chars.slice(0, this.cursor).join("");
-    // 光标处的字符（行尾用空格兜底：反显空格 = 块光标，与 pi Input 一致）；
-    // 按 code point 取（与本类编辑粒度一致，不劈代理对；ZWJ 簇只反显首个 code point，可接受）
-    const atCursor = this.chars[this.cursor] ?? " ";
-    const afterCursor = this.chars.slice(this.cursor + 1).join("");
-    const marker = focused ? CURSOR_MARKER : "";
-    const fakeCursor = `\x1b[7m${atCursor}\x1b[27m`;
-    let text = before + marker + fakeCursor + afterCursor;
-    if (visibleWidth(before) + visibleWidth(atCursor) + visibleWidth(afterCursor) > budget) {
-      // 光标左侧优先占满预算（搜索框场景光标通常在尾部）
-      const b = truncateToWidth(before, budget - 1, "");
-      const head = visibleWidth(b) < visibleWidth(before) ? "…" + b : b;
-      text = truncateToWidth(head + marker + fakeCursor + afterCursor, width - visibleWidth(prompt), "");
+    const budget = Math.max(0, width - visibleWidth(prompt));
+    if (budget === 0) return truncateToWidth(prompt, width, "");
+    // Keep the complete cursor grapheme visible; use a blank if it cannot fit.
+    const current = this.chars[this.cursor] ?? " ";
+    const atCursor = visibleWidth(current) <= budget ? current : " ";
+    const leftBudget = budget - visibleWidth(atCursor);
+    let start = this.cursor;
+    let before = "";
+    while (start > 0 && visibleWidth(this.chars[start - 1] + before) <= leftBudget) {
+      before = this.chars[--start] + before;
     }
-    return prompt + text;
+    // Indicate hidden text only when there is room without sacrificing the cursor.
+    if (start > 0 && leftBudget > 0) {
+      while (before && visibleWidth("…" + before) > leftBudget) {
+        before = this.chars.slice(++start, this.cursor).join("");
+      }
+      before = "…" + before;
+    }
+    const afterBudget = budget - visibleWidth(before) - visibleWidth(atCursor);
+    const after = truncateToWidth(this.chars.slice(this.cursor + 1).join(""), afterBudget, "");
+    const marker = focused ? CURSOR_MARKER : "";
+    return truncateToWidth(`${prompt}${before}${marker}\x1b[7m${atCursor}\x1b[27m${after}`, width, "");
   }
 }
 
@@ -875,6 +887,11 @@ export class GardenSelectorComponent {
   }
 
   render(width: number): string[] {
+    width = Math.max(0, Math.floor(width));
+    return this.renderLines(width).map((line) => truncateToWidth(line, width, ""));
+  }
+
+  private renderLines(width: number): string[] {
     const lines: string[] = [];
     lines.push(this.border(width));
     lines.push(...this.renderHeader(width));

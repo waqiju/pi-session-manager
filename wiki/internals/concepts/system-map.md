@@ -57,7 +57,7 @@ SSH 网页预览另提供进程内按需只读 HTTP 服务，无独立守护进�
 | `src/index-page.ts` | garden 目录索引 index.md 生成：fork 森林 + 相对链接嵌套列表；CLI 与扩展命令共用 |
 | `src/reverse-sync.ts` | 反向同步：人工编辑的 index.md（换父缩进 / to-delete / to-archive）对账并应用回 sessions；见 [reverse-sync](reverse-sync.md) |
 | `src/format.ts` | 会话展示格式化（nodeLabel / formatSizeLabel / formatDate），index.md 与子树复制共用 |
-| `src/textwidth.ts` | 终端文本宽度工具（ANSI 零宽 / CJK 宽字符 / 按列截断），供选择器渲染 |
+| `src/textwidth.ts` | CLI/插件共用的列宽与截断入口；复用 `src/vendor/pi-text/` 中带来源和许可证的上游快照，无 pi 运行时依赖；纯文本输出不引入 ANSI |
 | `src/preview.ts` | SSH 网页预览：模式/端口配置、进程内 HTTP 服务、Markdown HTML 渲染、路径校验 |
 | `src/open.ts` | gardener-open：级别选择、平台检测、打开命令 |
 | `src/cli.ts` | 参数、目录扫描、命名计划、旧文件清理、增量判断、写盘 |
