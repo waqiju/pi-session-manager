@@ -16,6 +16,28 @@ pi 扩展形态：会话生命周期内自动把**当前 session** 转成四级 
 > 刷新 clone 并重启 pi，否则一直跑旧代码。（2026-09-15 实例：Ctrl+N 修复已推送但“无效”，
 > 查得 clone 落后 4 个提交。）
 
+## 可选个人快捷键（Ctrl+G）
+
+默认安装不接管 Pi 主输入框的按键。若希望 Ctrl+G 直接打开 `/garden`，可安装
+仓库中的 [个人扩展示例](../../../examples/personal-shortcuts/garden-shortcut.ts)，并合并
+[按键配置示例](../../../examples/personal-shortcuts/keybindings.json)：
+
+1. 将 `examples/personal-shortcuts/garden-shortcut.ts` 复制到
+   `~/.pi/agent/extensions/garden-shortcut.ts`（自定义 agent directory 时使用对应目录）。
+2. 将示例 JSON 的两个字段合并到 `~/.pi/agent/keybindings.json`；文件不存在可直接复制，
+   已有文件不要覆盖其他配置。
+3. 在 Pi 中 `/reload`，用 `/hotkeys` 检查绑定。
+
+主输入框 Ctrl+G 打开 garden；Ctrl+E 打开外部编辑器；End 仍移到行末。
+`app.editor.external` 必须从 Ctrl+G 迁走，否则 Pi 的保留快捷键会阻止扩展注册；
+`tui.editor.cursorLineEnd: ["end"]` 替换默认 `["end", "ctrl+e"]`，释放 Ctrl+E，
+不是新增 End。外部编辑器仍由 `externalEditor` / `$VISUAL` / `$EDITOR` / 平台默认选择。
+
+扩展通过 `sendUserMessage("/garden", { expandPromptTemplates: true })` 分发命令，
+不修改输入框草稿，也不向模型提交普通消息；garden 命令未加载时不执行。
+选择器内部 Ctrl+G 仍是反向同步，Esc 取消后回到原输入框。
+该示例不在包的自动加载列表中，包更新不会覆盖已复制的个人配置。
+
 ## 触发点
 
 | pi 事件 | 作用 |
