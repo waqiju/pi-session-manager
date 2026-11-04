@@ -127,6 +127,101 @@ function plain(c: GardenSelectorComponent, width = 100): string {
     .join("\n");
 }
 
+test("选择器: 初始化定位当前会话且刷新不抢选择", async () => {
+  const items = Array.from({ length: 20 }, (_, i) => makeItem({ mdBase: `initial-${i}`, name: `entry-${i}` }));
+  const h = harness(items, undefined, { currentFilePath: `/alias/initial-18.jsonl`, maxVisible: 3 });
+  try {
+    await flush();
+    h.c.handleInput("\r");
+    assert.equal(h.selected.at(-1), items[18].path);
+    assert.match(plain(h.c), /› entry-18/);
+    h.c.handleInput("\x1b[A");
+    await (h.c as any).loadScope("current");
+    h.c.handleInput("\r");
+    assert.equal(h.selected.at(-1), items[17].path);
+  } finally { h.c.dispose(); }
+  for (const currentFilePath of [undefined, "/absent.jsonl"]) {
+    const fallback = harness(items, undefined, { currentFilePath });
+    await flush();
+    fallback.c.handleInput("\r");
+    assert.equal(fallback.selected[0], items[0].path);
+    fallback.c.dispose();
+  }
+});
+
+test("选择器: 查询变化重置第一条，光标移动不重置，清空和 Esc 回树", async () => {
+  const items = ["alpha", "alpine", "alps"].map((name) => makeItem({ mdBase: name, name }));
+  const h = harness(items);
+  const index = () => (h.c as any).selectedIndex;
+  try {
+    await flush();
+    h.c.handleInput("\x1b[B"); h.c.handleInput("\x1b[B");
+    h.c.handleInput("a");
+    assert.equal(index(), 0);
+    h.c.handleInput("\x1b[B");
+    h.c.handleInput("\x1b[H"); h.c.handleInput("\x1b[F");
+    assert.equal(index(), 1);
+    h.c.handleInput("\x1b[200~lp\x1b[201~");
+    assert.equal(index(), 0);
+    h.c.handleInput("\x1b[B"); h.c.handleInput("\x7f");
+    assert.equal(index(), 0);
+    h.c.handleInput("\x1b[B");
+    h.c.handleInput("\x1b");
+    assert.equal(h.cancelled.n, 0);
+    h.c.handleInput("\r");
+    assert.equal(h.selected.at(-1), items[1].path);
+    h.c.handleInput("no-match"); h.c.handleInput("\x15");
+    h.c.handleInput("\r");
+    assert.equal(h.selected.at(-1), items[1].path);
+    h.c.handleInput("re:["); h.c.handleInput("\x1b");
+    h.c.handleInput("\r");
+    assert.equal(h.selected.at(-1), items[1].path);
+    h.c.handleInput("\x1b");
+    assert.equal(h.cancelled.n, 1);
+  } finally { h.c.dispose(); }
+});
+
+test("选择器: Esc 只展开目标祖先，空结果回退缺失时选第一条", async () => {
+  const root = makeItem({ mdBase: "reveal-root", name: "root" });
+  const child = makeItem({ mdBase: "reveal-child", name: "child", parentSessionPath: root.path });
+  const leaf = makeItem({ mdBase: "reveal-leaf", name: "needle", parentSessionPath: child.path });
+  const other = makeItem({ mdBase: "other", name: "other" });
+  const hidden = makeItem({ mdBase: "hidden", name: "hidden", parentSessionPath: other.path });
+  const h = harness([root, child, leaf, other, hidden]);
+  try {
+    await flush();
+    const state = h.c as any;
+    state.collapsed = new Set(["reveal-root.jsonl", "reveal-child.jsonl", "other.jsonl"]);
+    state.refilter();
+    h.c.handleInput("needle"); h.c.handleInput("\x1b");
+    h.c.handleInput("\r");
+    assert.equal(h.selected.at(-1), leaf.path);
+    assert.deepEqual([...state.collapsed], ["other.jsonl"]);
+    assert.match(plain(h.c), /needle/);
+    h.c.handleInput("no-match");
+    state.items.current = [other, hidden]; // search-before selection disappeared on refresh
+    state.refilter();
+    h.c.handleInput("\x1b"); h.c.handleInput("\r");
+    assert.equal(h.selected.at(-1), other.path);
+  } finally { h.c.dispose(); }
+});
+
+test("选择器: 加载期间搜索不会被当前会话定位覆盖", async () => {
+  const items = ["alpha", "alpine"].map((name) => makeItem({ mdBase: name, name }));
+  let resolve!: (items: SessionListItem[]) => void;
+  const h = harness(items, undefined, {
+    currentFilePath: items[1].path,
+    loadCurrent: () => new Promise<SessionListItem[]>((r) => { resolve = r; }),
+  });
+  try {
+    h.c.handleInput("al");
+    resolve(items);
+    await flush();
+    h.c.handleInput("\r");
+    assert.equal(h.selected[0], items[0].path);
+  } finally { h.c.dispose(); }
+});
+
 test("选择器: 声明 fullscreen 输入所有权，翻页尊重注入绑定，子模式不泄漏翻页", async () => {
   const h = harness(Array.from({ length: 40 }, (_, i) => makeItem({ mdBase: `page-${i}`, name: `item-${i}` })), undefined, {
     maxVisible: 10,
@@ -160,6 +255,8 @@ test("选择器: 声明 fullscreen 输入所有权，翻页尊重注入绑定，
       h.c.handleInput("\x1b");
       assert.equal(h.c.capturesViewportInput, true);
     }
+    h.c.handleInput("\x1b"); // exit search first
+    assert.equal(h.cancelled.n, 0);
     h.c.handleInput("\x1b");
     assert.equal(h.cancelled.n, 1);
     assert.deepEqual(h.deleted, []);
@@ -204,9 +301,10 @@ test("选择器: 折叠/父子导航/搜索/别名 scope/复制/改名/删除", 
     assert.match(plain(h.c), /隐藏后代/);
     left(); right(); // search does not change collapse
     assert.equal(selected(), leaf.path);
-    h.c.handleInput("\x15"); // clear query -> visible ancestor
-    assert.equal(selected(), child.path);
-    assert.doesNotMatch(plain(h.c), /隐藏后代/);
+    h.c.handleInput("\x15"); // clear query -> reveal selected descendant
+    assert.equal(selected(), leaf.path);
+    assert.match(plain(h.c), /隐藏后代/);
+    left(); left(); // return to child and fold again
     h.c.handleInput("\t"); await flush();
     assert.match(plain(h.c), /分支 ◂ \(\+1\)/);
     assert.equal(selected(), child.path.replace("/tmp/x/", "/alias/"));

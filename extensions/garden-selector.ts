@@ -314,6 +314,8 @@ export class GardenSelectorComponent {
   /** JSONL basename 稳定跨目录别名/改名；只在本次打开期间保留。 */
   private collapsed = new Set<string>();
   private selectedIndex = 0;
+  private initialSelectionPending = true;
+  private preSearchKey: string | undefined;
   private statusMessage: { type: "info" | "error"; message: string } | null = null;
   private statusTimeout: ReturnType<typeof setTimeout> | null = null;
   private maxVisible: number;
@@ -368,7 +370,13 @@ export class GardenSelectorComponent {
       this.loading[scope] = false;
       if (scope !== this.scope) return;
       this.progress = null;
-      this.refilter();
+      if (this.initialSelectionPending) {
+        this.initialSelectionPending = false;
+        const current = items.find((item) => this.isCurrent(item));
+        this.refilter("reveal", current && basenameAny(current.path));
+      } else {
+        this.refilter();
+      }
       this.requestRender();
     } catch (err) {
       if (seq !== this.loadSeq[scope]) return;
@@ -394,15 +402,28 @@ export class GardenSelectorComponent {
   }
 
   /** 按当前 scope + 搜索词重建显示列表（空查询 = fork 树，非空 = 平铺搜索结果） */
-  private refilter(): void {
+  private selectedKey(): string | undefined {
+    const node = this.flat[this.selectedIndex];
+    return node && basenameAny(node.session.path);
+  }
+
+  private refilter(policy: "preserve" | "first" | "reveal" = "preserve", targetKey?: string): void {
     const items = this.items[this.scope] ?? [];
-    let selectedKey = this.flat[this.selectedIndex] && basenameAny(this.flat[this.selectedIndex].session.path);
+    let selectedKey = policy === "reveal" ? targetKey : this.selectedKey();
     const query = this.searchInput.getValue().trim();
     this.queryError = null;
     if (!query) {
       const roots = buildSessionTree(items);
+      if (policy === "reveal" && selectedKey) {
+        const parents = new Map(visibleSessionTree(roots, new Set()).map((n) => [basenameAny(n.session.path), n.parentKey]));
+        let parent = parents.get(selectedKey);
+        while (parent) {
+          this.collapsed.delete(parent);
+          parent = parents.get(parent);
+        }
+      }
       this.flat = visibleSessionTree(roots, this.collapsed);
-      // 搜索命中的后代可能被折叠：清空搜索后选最近可见祖先，不暗中展开。
+      // 普通结构更新保留身份；目标被折叠时回退到最近可见祖先。
       if (selectedKey && !this.flat.some((n) => basenameAny(n.session.path) === selectedKey)) {
         const parents = new Map(visibleSessionTree(roots, new Set()).map((n) => [basenameAny(n.session.path), n.parentKey]));
         while (selectedKey && parents.has(selectedKey)) {
@@ -423,7 +444,20 @@ export class GardenSelectorComponent {
       }));
     }
     const preserved = this.flat.findIndex((n) => basenameAny(n.session.path) === selectedKey);
-    this.selectedIndex = preserved >= 0 ? preserved : Math.max(0, Math.min(this.selectedIndex, this.flat.length - 1));
+    this.selectedIndex = policy === "first" ? 0 : preserved >= 0 ? preserved :
+      policy === "reveal" ? 0 : Math.max(0, Math.min(this.selectedIndex, this.flat.length - 1));
+  }
+
+  private searchChanged(previous: string): void {
+    const next = this.searchInput.getValue();
+    if (next === previous) return;
+    if (!previous.trim() && next.trim()) this.preSearchKey = this.selectedKey();
+    if (!next.trim()) {
+      this.refilter("reveal", this.selectedKey() ?? this.preSearchKey);
+      this.preSearchKey = undefined;
+    } else {
+      this.refilter("first");
+    }
   }
 
   private navigateTree(expand: boolean): void {
@@ -649,6 +683,8 @@ export class GardenSelectorComponent {
   // ----- 输入分发 -----
 
   handleInput(data: string): void {
+    // Never let a delayed initial load override an interaction already in progress.
+    this.initialSelectionPending = false;
     const kb = this.keybindings;
     if (this.mergingPaths) return;
     if (this.confirmingPathMerge) {
@@ -719,8 +755,14 @@ export class GardenSelectorComponent {
       }
     } else if (kb.matches(data, "tui.select.cancel")) {
       this.setStatus(null);
-      this.opts.onCancel();
-      return;
+      const previous = this.searchInput.getValue();
+      if (previous) {
+        this.searchInput.setValue("");
+        this.searchChanged(previous);
+      } else {
+        this.opts.onCancel();
+        return;
+      }
     } else if (kb.matches(data, "tui.input.tab")) {
       this.toggleScope();
       return;
@@ -757,7 +799,8 @@ export class GardenSelectorComponent {
       void this.doPrepareReverseSync();
       return;
     } else {
-      if (this.searchInput.handleInput(data)) this.refilter();
+      const previous = this.searchInput.getValue();
+      if (this.searchInput.handleInput(data)) this.searchChanged(previous);
     }
     this.requestRender();
   }
@@ -803,7 +846,7 @@ export class GardenSelectorComponent {
       const color = this.statusMessage.type === "error" ? "error" : "accent";
       return this.theme.fg(color, truncateToWidth(this.statusMessage.message, width, "…"));
     }
-    const hints = ['Tab scope · re:<正则> · "精确短语"', "Enter 切换 · Esc 取消"];
+    const hints = [this.searchInput.getValue() ? "Esc 清除搜索并定位" : "Esc 关闭", 'Enter 切换 · Tab scope · re:<正则> · "精确短语"'];
     if (this.opts.onNewChild) hints.push("Ctrl+N 新建子会话");
     if (this.opts.copyToClipboard) hints.push("Ctrl+Y 复制子树");
     if (this.opts.renameSession) hints.push("Ctrl+R 改名");
@@ -814,7 +857,9 @@ export class GardenSelectorComponent {
 
   private helpLines(width: number): string[] {
     const commands = [
-      "↑/↓ 选择 · PageUp/PageDown 翻页 · Enter 切换 · Esc 取消",
+      "↑/↓ 选择 · PageUp/PageDown 翻页 · Enter 切换",
+      "Esc：有搜索时清除并回树定位；无搜索时关闭",
+      "修改非空查询选第一条；清空定位当前结果（无结果则回搜索前选择）",
       "Ctrl+← 折叠 / 到父节点 · Ctrl+→ 展开 / 到首个子节点（仅空搜索）",
       'Tab 切换 Current/All · 输入搜索 · re:<正则> · "精确短语"',
       "搜索编辑：←/→ · Home/End · Backspace/Delete · Ctrl+A/E/U/K/W",
