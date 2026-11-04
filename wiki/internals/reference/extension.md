@@ -78,6 +78,17 @@ fork 树按 jsonl 文件名（basename）配对（`src/session-tree.ts`，文件
 零运行时 pi 依赖（theme / keybindings 由 `ctx.ui.custom` 工厂注入结构化接口），
 node --test 可直测（test/garden-selector.test.ts）。
 
+### Fullscreen 翻页（Pi 1.5+）
+
+自绘选择器声明 `capturesViewportInput = true`，让 Pi 将焦点组件的翻页键交给
+Garden，而不是先滚动聊天记录。不改成 overlay，也不全局禁用聊天翻页。
+搜索列表继续使用注入的 `tui.select.pageUp/pageDown` 绑定；重命名、确认和加载期间
+也保留输入所有权，未使用的翻页键不穿透到聊天。关闭后由 `ctx.ui.custom()` 恢复
+编辑器焦点，聊天翻页恢复。builtin 回退分支由 Pi 自带选择器管理输入所有权。
+
+此修复依赖 Pi 1.5 的组件输入所有权机制；Pi 1.3 不识别该属性，其 fullscreen
+拦截问题不会因此修复。regular 模式行为不变。
+
 ### md 数据源（src/session-list.ts）
 
 只读 garden 产物，不再读 jsonl（假设转换常驻、产物最新）：

@@ -319,6 +319,11 @@ export class GardenSelectorComponent {
   private maxVisible: number;
   private queryError: string | null = null;
 
+  // Pi 1.5+: keep viewport keys in this focused inline dialog, not the transcript.
+  // Also capture during rename/confirmation/loading: those modes deliberately ignore
+  // paging rather than unexpectedly scrolling the chat behind the dialog.
+  readonly capturesViewportInput = true;
+
   /** Focusable：TUI 聚焦时置位；聚焦才输出硬件光标标记 */
   focused = true;
 

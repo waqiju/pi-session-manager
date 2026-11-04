@@ -127,6 +127,48 @@ function plain(c: GardenSelectorComponent, width = 100): string {
     .join("\n");
 }
 
+test("选择器: 声明 fullscreen 输入所有权，翻页尊重注入绑定，子模式不泄漏翻页", async () => {
+  const h = harness(Array.from({ length: 40 }, (_, i) => makeItem({ mdBase: `page-${i}`, name: `item-${i}` })), undefined, {
+    maxVisible: 10,
+    keybindings: {
+      matches: (data: string, action: string) =>
+        (data === "next-page" && action === "tui.select.pageDown") ||
+        (data === "prev-page" && action === "tui.select.pageUp") || stubKeybindings.matches(data, action),
+    },
+  });
+  try {
+    assert.equal(h.c.capturesViewportInput, true, "加载期间也不把翻页交给聊天");
+    await flush();
+    const index = () => (h.c as any).selectedIndex;
+    assert.equal(index(), 0);
+    h.c.handleInput("next-page");
+    assert.equal(index(), 10);
+    h.c.handleInput("prev-page");
+    assert.equal(index(), 0);
+    h.c.handleInput("item-"); // 搜索仍在列表模式
+    assert.equal(h.c.capturesViewportInput, true);
+    h.c.handleInput("\x1b[6~");
+    assert.equal(index(), 10);
+    h.c.handleInput("\x1b[5~");
+    assert.equal(index(), 0);
+    for (const enterMode of ["\x12", "\x04"]) { // 重命名、删除确认
+      h.c.handleInput(enterMode);
+      assert.equal(h.c.capturesViewportInput, true);
+      h.c.handleInput("\x1b[6~");
+      h.c.handleInput("\x1b[5~");
+      assert.equal(index(), 0);
+      h.c.handleInput("\x1b");
+      assert.equal(h.c.capturesViewportInput, true);
+    }
+    h.c.handleInput("\x1b");
+    assert.equal(h.cancelled.n, 1);
+    assert.deepEqual(h.deleted, []);
+    assert.deepEqual(h.renamed, []);
+  } finally {
+    h.c.dispose();
+  }
+});
+
 test("选择器: 折叠/父子导航/搜索/别名 scope/复制/改名/删除", async () => {
   const root = makeItem({ mdBase: "root", name: "根" });
   const child = makeItem({ mdBase: "child", name: "分支", parentSessionPath: root.path });
