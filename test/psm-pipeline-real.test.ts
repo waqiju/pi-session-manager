@@ -73,8 +73,8 @@ if(q.method==='tools/list')result={tools:[{name:'probe',description:'Inherited M
 if(q.method==='tools/call')result={content:[{type:'text',text:'ok'}]};
 console.log(JSON.stringify({jsonrpc:'2.0',id:q.id,result}));});`);
     writeJson(path.join(source, "mcp.json"), { mcpServers: { probe: { command: process.execPath, args: [mcp], exposure: "direct" } } });
-    mkdirSync(path.join(home, "inherit"));
-    writeFileSync(path.join(home, "inherit/pipeline.mjs"), `export default ()=>({agentDir:${JSON.stringify(source)}});`);
+    mkdirSync(path.join(home, "pipelines/inherit"), { recursive: true });
+    writeFileSync(path.join(home, "pipelines/inherit/pipeline.mjs"), `export default ()=>({agentDir:${JSON.stringify(source)}});`);
     const inherited = await startPipeline(cwd, "inherit", "Reply briefly.");
     await wait(() => readJson(path.join(inherited.dir, "001.status.json"), {}).state === "completed");
     const first = requests[0];
@@ -88,7 +88,7 @@ console.log(JSON.stringify({jsonrpc:'2.0',id:q.id,result}));});`);
     await stop(inherited.dir);
 
     const example = fileURLToPath(new URL("../examples/pipelines/web-search", import.meta.url));
-    const searchDir = path.join(home, "web-search");
+    const searchDir = path.join(home, "pipelines/web-search");
     cpSync(example, searchDir, { recursive: true });
     // Intercept only the official search endpoint inside the real Pi process; no external requests.
     writeFileSync(path.join(searchDir, "mock.ts"), `export default () => { const original=globalThis.fetch; globalThis.fetch=async (url,options)=> {
@@ -110,7 +110,7 @@ return original(url,options);};};`);
     assert.equal(events.filter((event) => event.type === "tool_execution_end" && !event.isError).length, 2);
     await stop(search.dir);
 
-    const uiDir = path.join(home, "interactive");
+    const uiDir = path.join(home, "pipelines/interactive");
     mkdirSync(uiDir);
     writeFileSync(path.join(uiDir, "ask.ts"), `export default pi => pi.on('before_agent_start', async (_event,ctx) => { await ctx.ui.confirm('Needs input','Continue?'); });`);
     writeFileSync(path.join(uiDir, "pipeline.mjs"), `export default ({pipelineDir})=>({resources:'isolated',extensions:[pipelineDir+'/ask.ts'],config:{stableMs:500}});`);

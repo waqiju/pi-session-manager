@@ -4,8 +4,9 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { loadPipeline, preparePipeline, type Pipeline } from "./pipeline.ts";
-import { loadConfig, selectModel } from "./config.ts";
+import { listPipelines, loadPipeline, preparePipeline, type Pipeline } from "./pipeline.ts";
+import { listModels } from "./models.ts";
+import { psmHome, loadConfig, selectModel } from "./config.ts";
 import { atomicWrite, delay, now, writeJson } from "./files.ts";
 import { formatRuns } from "./table.ts";
 import { openFile } from "../open.ts";
@@ -19,7 +20,9 @@ const usage = `psm — file-driven background Pi sessions (Pi >= 1.5; Linux/WSL/
   psm <model-expression> <first-prompt> [--group <name>]
   psm <first-prompt>                 Use config.defaultModel
   psm run <pipeline> <first-prompt> [--group <name>] [--json]
-  psm run <pipeline> --file <path>   Run .psm/<pipeline>/pipeline.mjs (local, then global)
+  psm run <pipeline> --file <path>   Run .psm/pipelines/<pipeline>/pipeline.mjs (local, then global)
+  psm models [search]               List available models using PSM configuration
+  psm pipelines [--json]            List pipelines without executing their JS
   psm list [--all] [--group <name>] [--json]
   psm status <run-id>                JSON status; numeric IDs accept shorthand (1 = 000001)
   psm open <run-id> [--level l1|l3]   Open archive (default L3) using the garden system opener
@@ -90,6 +93,24 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     throw new Error("--format, --lines and --no-follow are for logs");
   if (values.file !== undefined && !["prompt", "run"].includes(command)) throw new Error("--file is for prompt/run");
   if (values.level !== undefined && command !== "open") throw new Error("--level is for open");
+  if (command === "models") {
+    if (rest.length > 1 || values.all || values.group || values.json) throw new Error("Usage: psm models [search]");
+    process.stdout.write(await listModels(process.cwd(), rest[0]));
+    return;
+  }
+  if (command === "pipelines") {
+    if (rest.length || values.all || values.group) throw new Error("Usage: psm pipelines [--json]");
+    const pipelines = listPipelines(process.cwd(), psmHome());
+    if (values.json) console.log(JSON.stringify(pipelines, null, 2));
+    else if (!pipelines.length) console.log("No pipelines found. Add .psm/pipelines/<name>/pipeline.mjs or a global PSM pipeline.");
+    else {
+      const width = Math.max(4, ...pipelines.map((p) => p.name.length));
+      console.log(`${"NAME".padEnd(width)}  SCOPE   ENTRY    PATH`);
+      for (const p of pipelines) console.log(`${p.name.padEnd(width)}  ${p.scope.padEnd(6)}  ${(p.entryExists ? "present" : "missing").padEnd(7)}  ${p.file}`);
+      console.log("Entry presence only; JS is not executed or validated. Local entries override global entries.");
+    }
+    return;
+  }
   if (command === "run") {
     if (values.all || (values.file !== undefined ? rest.length !== 1 : rest.length !== 2))
       throw new Error("Usage: psm run <pipeline> <text> OR psm run <pipeline> --file <path> [--group <name>] [--json]");

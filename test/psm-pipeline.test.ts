@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { checkPipeline, loadPipeline, pipelineArgs, preparePipeline } from "../src/psm/pipeline.ts";
+import { listPipelines, checkPipeline, loadPipeline, pipelineArgs, preparePipeline } from "../src/psm/pipeline.ts";
 import { startPipeline } from "../src/psm/cli.ts";
 import { restartRun, requestStop } from "../src/psm/lifecycle.ts";
 import { inspectRun, listRuns } from "../src/psm/runs.ts";
@@ -29,7 +29,7 @@ function setup(t: any) {
   process.env.PSM_HOME = home;
   writeJson(path.join(home, "config.json"), { defaultModel: "fixture/test", piCommand: [process.execPath, fixture], pollMs: 30, stableMs: 60, startupTimeoutMs: 3000 });
   const put = (base: string, name: string, expression: string) => {
-    const dir = path.join(base, name);
+    const dir = path.join(base, "pipelines", name);
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "pipeline.mjs"), `export default async ({cwd,pipelineDir}) => (${expression});`);
     return dir;
@@ -54,7 +54,31 @@ test("local pipeline shadows global; malformed local and unsafe names never fall
   await assert.rejects(loadPipeline(cwd, home, "demo"), /default function/);
   rmSync(path.join(local, "pipeline.mjs"));
   await assert.rejects(loadPipeline(cwd, home, "demo"), /Missing pipeline entry/);
-  for (const name of ["../escape", "runs", "", "a/b", "registry", "ids"]) await assert.rejects(loadPipeline(cwd, home, name), /name/);
+  for (const name of ["../escape", "", "a/b"]) await assert.rejects(loadPipeline(cwd, home, name), /name/);
+});
+
+test("discovery shares local precedence, reports broken entries and never executes JS", async (t) => {
+  const { cwd, home, root, put } = setup(t);
+  const marker = path.join(root, "executed");
+  const global = put(home, "demo", `{resources:'isolated'}`);
+  const local = put(path.join(cwd, ".psm"), "demo", `{resources:'isolated'}`);
+  writeFileSync(path.join(local, "pipeline.mjs"), `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(marker)}, 'bad'); throw Error('must not execute');`);
+  const entries = listPipelines(cwd, home);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].directory, local);
+  assert.equal(entries[0].shadowed[0].directory, global);
+  assert.equal(existsSync(marker), false);
+  rmSync(path.join(local, "pipeline.mjs"));
+  assert.equal(listPipelines(cwd, home)[0].entryExists, false);
+  await assert.rejects(loadPipeline(cwd, home, "demo"), /Missing pipeline entry/);
+  const output = await promisify(execFile)(process.execPath, [cli, "pipelines", "--json"], { cwd });
+  assert.deepEqual(JSON.parse(output.stdout), listPipelines(cwd, home));
+  assert.equal(existsSync(marker), false);
+  mkdirSync(path.join(home, "legacy"));
+  writeFileSync(path.join(home, "legacy/pipeline.mjs"), "throw Error('legacy');");
+  await assert.rejects(loadPipeline(cwd, home, "legacy"), /Pipeline not found/);
+  assert.equal(listPipelines(cwd, home).length, 1);
+  assert.equal(listPipelines(path.dirname(home), home).length, 1);
 });
 
 test("schema rejects session overrides and invalid fields before launching", async (t) => {

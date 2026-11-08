@@ -10,16 +10,20 @@
 
 ### 安装并运行 web-search 示例
 
-在仓库根目录执行，目标 `.psm/web-search` 应不存在：
+在仓库根目录执行，目标 `.psm/pipelines/web-search` 应不存在：
 
 ```bash
-mkdir -p .psm
-cp -R examples/pipelines/web-search .psm/web-search
+mkdir -p .psm/pipelines
+cp -R examples/pipelines/web-search .psm/pipelines/web-search
+psm pipelines
+psm models deepseek
 psm run web-search "最近十天，日本有哪些重要新闻？请引用来源。"
 psm run web-search --file ./question.md
 ```
 
-也可把示例目录复制到 `~/.psm/web-search`，让各工作目录使用。设置 `PSM_HOME` 时，使用该目录代替 `~/.psm`。本地 `.psm/<name>` 优先于全局；本地目录存在但入口缺失、语法错误或配置无效时直接失败，不回退。
+也可把示例目录复制到 `~/.psm/pipelines/web-search`，让各工作目录使用。设置 `PSM_HOME` 时，使用该目录代替 `~/.psm`。本地 `.psm/pipelines/<name>` 优先于全局；本地目录存在但入口缺失、语法错误或配置无效时直接失败，不回退。
+
+`psm pipelines` 显示名称、local/global 来源、入口是否存在和完整路径；仅检查文件，不执行 JS，也不验证函数返回值。`--json` 还包含被本地覆盖的全局候选。列表与启动使用相同的目录优先级。旧的 `.psm/<name>` 根目录布局不再发现；请迁移到 `pipelines/`，符号链接迁移后需修正相对目标。移动资源会使已有 run 的 restart 摘要校验失败，迁移前应结束旧 run，之后创建新 run。
 
 示例固定模型 `deepseek/deepseek-v4-flash`，使用 `isolated`，只开放 `read`、`web_search`、`web_fetch`。不必改日常 Pi 环境。若该模型在你的 provider 中不可用，在 `pipeline.mjs` 改成可用的完整表达式；搜索工具也可供其他 provider 的模型调用。
 
@@ -32,7 +36,7 @@ psm run web-search --file ./question.md
 ### 定义 pipeline
 
 ```text
-.psm/review/
+.psm/pipelines/review/
   pipeline.mjs
   tools/review.ts
   skills/review/SKILL.md
@@ -57,7 +61,7 @@ export default async function ({ cwd, pipelineDir }) {
 }
 ```
 
-函数可以同步或异步，必须返回对象。PSM 使用 Node 原生 ESM 加载 `.mjs`；执行 pipeline 即执行本地 JS。相对资源路径和显式 `agentDir` 相对 `pipeline.mjs` 所在目录解析；`cwd` 始终是调用 PSM 的工作目录。目录名使用 1～64 位字母、数字、`_`、`-`，首位必须是字母或数字；`runs`、`registry`、`ids` 为保留名。
+函数可以同步或异步，必须返回对象。PSM 使用 Node 原生 ESM 加载 `.mjs`；执行 pipeline 即执行本地 JS。相对资源路径和显式 `agentDir` 相对 `pipeline.mjs` 所在目录解析；`cwd` 始终是调用 PSM 的工作目录。目录名使用 1～64 位字母、数字、`_`、`-`，首位必须是字母或数字。所有 pipeline 位于 `pipelines/` 下，不与 `runs`、`registry`、`ids` 数据目录共用命名空间。
 
 | 字段 | 行为 |
 |---|---|
@@ -116,7 +120,7 @@ python3 scripts/check_wiki_links.py
 
 ## Troubleshooting
 
-- `Pipeline not found`：确认从预期 cwd 启动，且文件位于 `.psm/<name>/pipeline.mjs` 或全局 PSM 目录；不会向父目录查找。
+- `Pipeline not found`：确认从预期 cwd 启动，且文件位于 `.psm/pipelines/<name>/pipeline.mjs` 或全局 `$PSM_HOME/pipelines/<name>/pipeline.mjs`；不会向父目录查找。
 - `Pipeline resource changed`：恢复提示中的源文件，或者创建新 run 使用新配置。restart 不会重新运行 JS。
 - 搜索认证/余额失败：检查 PSM DeepSeek 认证或 DEEPSEEK_API_KEY；不要把密钥复制到 prompt。模型可调用不代表搜索账号权限和余额一定可用。
 - `no interactive UI`：所选扩展需要人工对话，改用支持 RPC 无交互执行的配置，或在 pipeline 中关闭该类扩展后新建 run。

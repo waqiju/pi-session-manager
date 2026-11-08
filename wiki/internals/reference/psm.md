@@ -7,6 +7,8 @@ psm <model-expression> "首条 prompt" [--group research] [--json]
 psm "首条 prompt"                       # config.defaultModel
 psm run web-search "搜索近期新闻" [--group research] [--json]
 psm run web-search --file ./question.md
+psm models [search]                    # 当前 PSM 配置下的可用模型
+psm pipelines [--json]                 # 发现启动方案，不执行 JS
 psm list [--all] [--group research] [--json]
 psm status 1                           # 1 / 01 / 000001 均指向 000001
 psm stop 1
@@ -23,15 +25,23 @@ psm prompt 1 --file ./prompt.md [--json]
 psm --help
 ```
 
-prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`restart`、`open`、`prompt`、`logs`、`run` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型表达式消除歧义。
+prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`restart`、`open`、`prompt`、`logs`、`run`、`models`、`pipelines` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型表达式消除歧义。
 
 默认 `list` 显示最近 24 小时有活动的 run，加上所有仍存活的 run；`--all` 显示全部注册历史。注册表跨 cwd，位于 `~/.psm/registry/`。已删除 run 目录的记录跳过。所有按 run 操作的命令接受 1～6 位数字简写，补齐六位后精确匹配；0 或超过六位的数字无效，数字不作前缀查询。历史非数字 ID 仍可用唯一前缀。status 输出 JSON；stop 最多等待 10 秒，超时返回非零并提示停止请求尚未确认。
 
 启动命令在 worker 和 Pi 就绪后返回 run ID、实际 provider/model、thinking、目录和首轮结果路径；不会向终端输出模型回答。启动失败返回非零并提供 run 目录。命令成功只表示后台就绪，后续模型错误见轮次状态。
 
+## 模型与 pipeline 列表
+
+`psm models [search]` 复用 `piCommand` 的原生 `--list-models`，显示 provider、模型 ID、上下文长度和能力等信息；可选关键字使用 Pi 的模糊筛选。输出还包含 PSM defaultModel 表达式和选中的 models.json 路径。列表来自 Pi 内置目录加上 PSM 自定义定义，按当前认证可用性筛选，不是只列 models.json，也不验证余额或实际 API 权限。
+
+查询在临时私有 agent 目录使用 PSM 合并后的 auth、整文件选择的 models 符号链接和 provider 环境变量；不读取日常 Pi agent 的模型认证。不加载扩展、MCP、项目资源或上下文，不创建 run、占用编号或发送推理请求；结束后清理临时文件。关闭自动模型目录更新；超时采用 startupTimeoutMs。Pi 报错或产生诊断时给出通用配置错误，不转发可能包含凭据的原文。首期保留 Pi 原生文本输出，不支持 `models --json`。
+
+`psm pipelines [--json]` 按名称列出当前目录可用的启动方案，本地覆盖全局。文本列包含 NAME、SCOPE、ENTRY、PATH，ENTRY 只表示入口文件存在与否，不代表 JS 可执行或配置有效。JSON 的 shadowed 数组包含被覆盖的全局候选。列举不导入模块、不执行工厂函数；本地缺失入口仍覆盖全局候选，启动时明确报错。
+
 ## JS pipeline
 
-`psm run <name> <prompt>` 或 `psm run <name> --file <path>` 执行本地 `.psm/<name>/pipeline.mjs`，没有本地目录时查全局 PSM 目录。默认 `inherit` 继承指定 Pi agent 资源与项目资源；`isolated` 仅加载明确指定资源。模型认证仍由 PSM 配置提供。启动输出包含 pipeline 名称与模式，status 的 `pipeline` 保存解析后的配置与资源摘要。`--group` 优先于 pipeline group。
+`psm run <name> <prompt>` 或 `psm run <name> --file <path>` 执行本地 `.psm/pipelines/<name>/pipeline.mjs`，没有本地目录时查全局 `$PSM_HOME/pipelines/<name>/pipeline.mjs`（默认 `~/.psm/pipelines/`）。仅支持此布局，旧根目录布局需迁移。默认 `inherit` 继承指定 Pi agent 资源与项目资源；`isolated` 仅加载明确指定资源。模型认证仍由 PSM 配置提供。启动输出包含 pipeline 名称与模式，status 的 `pipeline` 保存解析后的配置与资源摘要。`--group` 优先于 pipeline group。
 
 restart 不再执行 JS，资源摘要不匹配时拒绝恢复；两种模式不影响现有文件协议。附加系统提示、工具选择和完整字段参见 [pipeline 使用说明](../tasks/psm-pipelines.md)。普通 `psm "prompt"` 的加载行为不变。
 

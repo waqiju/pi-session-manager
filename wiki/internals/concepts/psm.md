@@ -21,7 +21,8 @@ CLI 等待 RPC `get_state` 成功并保存实际 provider/model/thinking 后返�
 | `src/psm/cli.ts` | 创建配置快照、注册 run、list/status/stop/restart/open/prompt/logs、数字 prompt 简写 |
 | `src/psm/lifecycle.ts` | worker 启动、停止请求、恢复前校验、轮次对账及 restart |
 | `src/psm/control.ts` | 控制锁、进程存活与启动身份检查 |
-| `src/psm/pipeline.ts` | JS pipeline 加载/校验、资源继承、启动参数与恢复前内容摘要检查 |
+| `src/psm/pipeline.ts` | pipelines/ 目录发现（不执行 JS）、JS 加载/校验、资源继承、启动参数与恢复前内容摘要检查 |
+| `src/psm/models.ts` | 用临时私有 PSM 环境调用 Pi 模型列表，不创建 run |
 | `src/psm/config.ts` | 全局/本地配置合并、模型表达式选择 |
 | `src/psm/worker.ts` | 输入串行消费、状态机、RPC 事件、归档、终止 |
 | `src/psm/rpc.ts` | 子进程、LF framing、请求关联、背压、关闭 |

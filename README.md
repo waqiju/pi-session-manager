@@ -53,11 +53,13 @@ Pi 在调用命令时的 cwd 工作；首轮结果为 `001.out.md`，多轮交�
 
 普通 `psm "prompt"` 继续关闭自动加载的 Pi 插件、skills 和 MCP，保留默认工具与 cwd 的 AGENTS.md 上下文。
 
-`psm run <pipeline> "prompt"` 加载 `.psm/<pipeline>/pipeline.mjs`（本地优先，再查全局）。
+`psm run <pipeline> "prompt"` 加载 `.psm/pipelines/<pipeline>/pipeline.mjs`（本地优先，再查全局）。
+`psm models [search]` 使用 PSM 配置列出 Pi 可用模型；`psm pipelines [--json]` 列出启动方案，不执行 JS。
+`psm list` 继续只显示会话运行记录。
 JS 可以定制模型、thinking、group、资源和附加系统提示：`inherit` 继承指定 Pi 环境后增减资源，
 `isolated` 只加载明确指定的资源。两种模式都保留独立后台会话和 PSM 模型认证。
 
-仓库提供 `examples/pipelines/web-search/`，复制到 `.psm/web-search/` 或 `~/.psm/web-search/`
+仓库提供 `examples/pipelines/web-search/`，复制到 `.psm/pipelines/web-search/` 或 `~/.psm/pipelines/web-search/`
 即可使用 DeepSeek 官方 Search/Fetch API。配置、费用、资源继承和恢复规则见
 [JS pipeline 使用说明](wiki/internals/tasks/psm-pipelines.md)。
 

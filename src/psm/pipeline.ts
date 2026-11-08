@@ -73,11 +73,50 @@ export function checkPipeline(pipeline?: Pipeline): void {
   }
 }
 
+export interface PipelineCandidate {
+  name: string;
+  scope: "local" | "global";
+  directory: string;
+  file: string;
+  entryExists: boolean;
+}
+export interface PipelineListing extends PipelineCandidate { shadowed: PipelineCandidate[] }
+
+function pipelineRoots(cwd: string, home: string): { directory: string; scope: "local" | "global" }[] {
+  const local = path.resolve(cwd, ".psm", "pipelines");
+  const global = path.resolve(home, "pipelines");
+  return [{ directory: local, scope: "local" }, ...(local === global ? [] : [{ directory: global, scope: "global" as const }])];
+}
+function candidate(directory: string, name: string, scope: "local" | "global"): PipelineCandidate {
+  const file = path.join(directory, "pipeline.mjs");
+  let entryExists = false;
+  try { entryExists = statSync(file).isFile(); } catch { /* missing, broken link or unreadable */ }
+  return { name, scope, directory, file, entryExists };
+}
+
+/** Discover entries without importing modules or executing pipeline factories. */
+export function listPipelines(cwd: string, home: string): PipelineListing[] {
+  const found = new Map<string, PipelineListing>();
+  for (const root of pipelineRoots(cwd, home)) {
+    let names: string[];
+    try { names = readdirSync(root.directory); }
+    catch (error: any) { if (error.code === "ENOENT") continue; throw error; }
+    for (const name of names.sort()) {
+      if (!validName.test(name)) continue;
+      const item = candidate(path.join(root.directory, name), name, root.scope);
+      const previous = found.get(name);
+      if (previous) previous.shadowed.push(item);
+      else found.set(name, { ...item, shadowed: [] });
+    }
+  }
+  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function loadPipeline(cwd: string, home: string, name: string): Promise<Pipeline> {
-  if (!validName.test(name) || ["runs", "registry", "ids"].includes(name)) throw new Error("Invalid or reserved pipeline name");
-  const roots = [...new Set([path.join(cwd, ".psm", name), path.join(home, name)])];
+  if (!validName.test(name)) throw new Error("Invalid pipeline name");
+  const roots = pipelineRoots(cwd, home).map((root) => path.join(root.directory, name));
   const directory = roots.find((root) => lstatSync(root, { throwIfNoEntry: false }));
-  if (!directory) throw new Error(`Pipeline not found: ${name}; expected .psm/${name}/pipeline.mjs or ${home}/${name}/pipeline.mjs`);
+  if (!directory) throw new Error(`Pipeline not found: ${name}; expected .psm/pipelines/${name}/pipeline.mjs or ${home}/pipelines/${name}/pipeline.mjs`);
   const file = path.join(directory, "pipeline.mjs");
   if (!existsSync(file)) throw new Error(`Missing pipeline entry: ${file}`);
   const before = fingerprint(directory);
