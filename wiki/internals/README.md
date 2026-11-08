@@ -12,6 +12,10 @@ garden（pi-session-manager）的内部技术文档，仿 Kubernetes 文档范�
 
 ## 常用入口
 
+- PSM 后台会话架构：[psm](wiki/internals/concepts/psm.md)
+- PSM CLI、配置和文件协议：[psm-reference](wiki/internals/reference/psm.md)
+- PSM 首次使用：[run-psm](wiki/internals/tasks/run-psm.md)
+
 - garden 全景与模块划分：[system-map](concepts/system-map.md)
 - l0/l1/l2/l3 四级输出的定位：[lod-levels](concepts/lod-levels.md)
 - 截断的设计哲学与预算依据：[truncation](concepts/truncation.md)

@@ -1,6 +1,47 @@
 # pi-session-manager
 
-简称：garden
+PSM 1.0：通过文件驱动的后台 pi 会话管理器，附带 garden Markdown 归档工具与 pi 扩展。
+
+## PSM 后台会话
+
+要求：Node.js >= 22.19、Pi >= 1.5；支持 Linux / WSL / macOS，暂不支持原生 Windows。
+
+```bash
+npm install --ignore-scripts --legacy-peer-deps
+npm link --ignore-scripts --legacy-peer-deps
+psm deepseek "分析当前项目结构"    # 就绪后返回 run ID 和目录，在后台继续执行
+psm list                         # 最近 24 小时有活动的 run + 所有存活 run
+psm status <run-id>
+psm stop <run-id>
+```
+
+先在 `~/.psm/config.json` 配置模型别名，例如：
+
+```json
+{
+  "defaultModel": "deepseek",
+  "models": {
+    "deepseek": { "provider": "deepseek", "model": "deepseek-chat" }
+  }
+}
+```
+
+模型 endpoint 和认证通过 PSM 自己的 `models.json` / `auth.json` 或 provider 环境变量配置，
+不读取全局 Pi 配置/凭据。当前目录 `.psm/` 的同名配置覆盖全局配置。
+完整配置示例见 [PSM 参考](wiki/internals/reference/psm.md)。
+
+每个 run 存放在 `<cwd>/.psm/runs/<group>/<run-id>/`，默认 group 为 `default`。
+Pi 在调用命令时的 cwd 工作；首轮结果为 `001.out`，多轮交互通过依次创建 `002.in`、
+`003.in` 等文件提交，编号最多到 `999`。推荐先写临时文件再重命名为 `.in`。
+每轮串行执行，成功后生成对应 `.out`，状态见 `.status.json`；自动维护 `session.jsonl`、
+`session.l1.md` 和 `session.l3.md`。空闲进程持续等待，使用 `psm stop` 结束。
+
+PSM 默认关闭自动加载的 Pi 插件、skills 和 MCP，保留默认工具与 cwd 的 AGENTS.md 上下文。
+第一期不提供自定义 system prompt 或崩溃自动重放。
+
+[首次使用](wiki/internals/tasks/run-psm.md) · [架构与故障语义](wiki/internals/concepts/psm.md)
+
+## garden 归档
 
 把 pi 的 session 记录（`~/.pi/agent/sessions/**/*.jsonl`，人类阅读困难）转换为
 四级 markdown 归档，输出到与 sessions 同级的 `garden/` 目录。
@@ -8,7 +49,7 @@
 ## 快速开始
 
 ```bash
-# 要求：Node.js >= 22.18（原生 type-stripping，无构建）
+# 要求：Node.js >= 22.19（原生 type-stripping，无构建）
 npm install --ignore-scripts --legacy-peer-deps # 安装网页预览依赖；不另装 pi peer
 node src/cli.ts                    # ~/.pi/agent/sessions → ~/.pi/agent/garden
 node src/cli.ts <sessions目录>     # 输出到其同级 garden/
@@ -101,6 +142,7 @@ index.md 同时是**反向同步**的编辑入口：人工调整缩进（换父�
 ## 开发
 
 ```bash
-npm test                          # node --test
+npm test                          # node --test（真实 Pi 集成测试默认跳过）
+PSM_REAL_PI=/absolute/path/to/pi node --test test/psm-real-pi.test.ts # 真实 Pi + 本地模拟 API，无外部费用
 python3 scripts/check_wiki_links.py   # 改了 wiki / README / AGENTS 后运行
 ```

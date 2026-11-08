@@ -5,6 +5,9 @@ SSH 网页预览另提供进程内按需只读 HTTP 服务，无独立守护进�
 
 ## 全景
 
+PSM 1.0 另提供后台 RPC worker 与文件交互入口，数据独立于传统 sessions/garden 布局。
+参见 [PSM 架构](wiki/internals/concepts/psm.md)。下图描述现有 garden 通路。
+
 ```
 ┌────────────────────────────────────────────────────────────┐
 │ pi (coding agent)                                          │

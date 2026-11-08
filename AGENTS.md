@@ -2,13 +2,16 @@
 
 ## 项目概述
 
+PSM 1.0 增加全局 `psm` CLI：独立后台 worker 管理 Pi RPC，通过编号 `.in/.out` 文件进行多轮交互，数据保存在调用目录的 `.psm/runs/`。
+改 PSM 代码前先读 [PSM 架构](wiki/internals/concepts/psm.md) 与 [配置/协议](wiki/internals/reference/psm.md)。
+
 garden（pi-session-manager）：把 pi 的 session 记录（`.jsonl`，机器格式、人类阅读困难）
 转换为四级 markdown 归档（l0 / l1 / l2 / l3），输出到与 sessions 同级的 `garden/` 目录。
 双形态：独立 CLI（`src/cli.ts`）+ pi 扩展（`extensions/garden.ts`，薄适配层，渲染核心共用 src/）。
 
 ## 技术栈
 
-- Node.js ≥ 22.18，无构建（原生 type-stripping 直接运行 `.ts`；只允许可擦除语法）
+- Node.js ≥ 22.19，无构建（原生 type-stripping 直接运行 `.ts`；只允许可擦除语法）
   —— Markdown 转换核心零依赖；网页预览使用运行时依赖 `markdown-it`。
   —— pi 扩展由 pi 的 jiti 加载，`extensions/` 下允许 `import type ... from "@earendil-works/pi-coding-agent"`
   （仅类型导入，运行时被擦除）
@@ -17,6 +20,7 @@ garden（pi-session-manager）：把 pi 的 session 记录（`.jsonl`，机器�
 
 ## 开发规范
 
+- PSM 测试：`test/psm.test.ts` 使用模拟 RPC 子进程；`PSM_REAL_PI=/absolute/path/to/pi node --test test/psm-real-pi.test.ts` 使用真实 Pi + 本地模拟 API（无外部模型调用）。Pi 最低版本 1.5，原生 Windows 不支持。
 - **技术文档**：在 `wiki/internals/` 维护，仿 k8s 范式（concepts / tasks / reference）。
   入口：[wiki/internals/README.md](wiki/internals/README.md)；改代码前先读
   [系统地图](wiki/internals/concepts/system-map.md)

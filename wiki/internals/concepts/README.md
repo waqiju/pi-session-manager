@@ -4,6 +4,7 @@
 
 | 页面 | 内容 |
 |------|------|
+| [psm](wiki/internals/concepts/psm.md) | 后台 Pi RPC worker、隔离、状态与故障语义 |
 | [system-map](system-map.md) | garden 全景：数据流、模块划分、增量机制 |
 | [lod-levels](lod-levels.md) | l0 / l1 / l2 / l3 四级输出的定位与取舍 |
 | [truncation](truncation.md) | 截断哲学（宁多不少 / 6:4 / 整行 / 永不硬切）与预算的统计依据 |

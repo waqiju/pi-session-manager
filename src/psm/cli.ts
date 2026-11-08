@@ -1,0 +1,106 @@
+#!/usr/bin/env node
+import { closeSync, mkdirSync, openSync, realpathSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseArgs } from "node:util";
+import { loadConfig, selectModel } from "./config.ts";
+import { atomicWrite, delay, now, writeJson } from "./files.ts";
+import { findRun, inspectRun, listRuns, type Run } from "./runs.ts";
+
+const usage = `psm — file-driven background Pi sessions (Pi >= 1.5; Linux/WSL/macOS)
+
+  psm <model-alias> <first-prompt> [--group <name>]
+  psm <first-prompt>                 Use config.defaultModel
+  psm list [--all] [--group <name>] [--json]
+  psm status <run-id>                JSON status; IDs may be unique prefixes
+  psm stop <run-id>                  Request shutdown and wait up to 10 seconds
+
+Quote each prompt as one argument; use -- before a prompt starting with '-'.
+Configure ~/.psm/config.json and ./.psm/config.json (local overrides global).
+Create 002.in, 003.in, ... in the returned directory for subsequent turns.
+Publish inputs by renaming a temporary file. Completed replies appear as NNN.out.
+`;
+
+export async function startRun(cwd: string, prompt: string, alias?: string, group = "default"): Promise<Run> {
+  if (process.platform === "win32") throw new Error("Native Windows is not supported yet; use WSL");
+  if (!prompt.trim()) throw new Error("First prompt must not be empty");
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(group)) throw new Error("Group must use 1–64 letters, numbers, '_' or '-'");
+  const loaded = loadConfig(cwd);
+  const model = selectModel(loaded.config, alias);
+  const id = randomUUID();
+  const dir = path.join(loaded.local, "runs", group, id);
+  const agent = path.join(dir, "agent");
+  mkdirSync(agent, { recursive: true, mode: 0o700 });
+  writeJson(path.join(agent, "models.json"), loaded.models);
+  writeJson(path.join(agent, "auth.json"), loaded.auth);
+  writeJson(path.join(agent, "settings.json"), { packages: [], quietStartup: true });
+  const run: Run = { schema: 1, id, token: randomUUID(), dir, cwd, group, model, config: loaded.config,
+    state: "starting", createdAt: now(), updatedAt: now() };
+  writeJson(path.join(dir, "run.json"), run);
+  atomicWrite(path.join(dir, "001.in"), prompt);
+  writeJson(path.join(loaded.home, "registry", `${id}.json`), { id, dir });
+  const log = openSync(path.join(dir, "stderr.log"), "a", 0o600);
+  try {
+    const child = spawn(process.execPath, [fileURLToPath(new URL("./worker.ts", import.meta.url)), dir], {
+      cwd, detached: true, stdio: ["ignore", log, log], env: process.env,
+    });
+    await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
+    child.unref();
+  } catch (error: any) {
+    run.state = "failed"; run.error = error.message; run.updatedAt = now();
+    writeJson(path.join(dir, "run.json"), run);
+    throw new Error(`Worker startup failed: ${error.message}; run directory: ${dir}`);
+  } finally { closeSync(log); }
+  const deadline = Date.now() + loaded.config.startupTimeoutMs + 2000;
+  while (Date.now() < deadline) {
+    const latest = inspectRun(dir);
+    if (latest.state === "idle" || latest.state === "running") return latest;
+    if (["failed", "stopped", "interrupted"].includes(latest.state)) throw new Error(`${latest.error || latest.state}; run directory: ${dir}`);
+    await delay(100);
+  }
+  writeJson(path.join(dir, "stop.json"), { token: run.token, requestedAt: now() });
+  throw new Error(`Startup timed out; shutdown requested. Inspect ${dir}/stderr.log`);
+}
+
+export async function main(args = process.argv.slice(2)): Promise<void> {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
+    help: { type: "boolean", short: "h" }, all: { type: "boolean" }, json: { type: "boolean" }, group: { type: "string" },
+  } });
+  if (values.help || !positionals.length) { console.log(usage); return; }
+  const [command, ...rest] = positionals;
+  if (command === "list") {
+    if (rest.length) throw new Error("Usage: psm list [--all] [--group name] [--json]");
+    const runs = listRuns(undefined, values.all).filter((run) => !values.group || run.group === values.group);
+    if (values.json) console.log(JSON.stringify(runs, null, 2));
+    else {
+      console.log("ID\tSTATE\tALIVE\tGROUP\tMODEL\tUPDATED\tDIRECTORY");
+      for (const run of runs) console.log(`${run.id}\t${run.state}\t${run.alive}\t${run.group}\t${run.model.provider}/${run.model.model}\t${run.updatedAt}\t${run.dir}`);
+    }
+    return;
+  }
+  if (values.all || values.group && ["status", "stop"].includes(command)) throw new Error("--all is for list; --group is for start/list");
+  if (command === "status" || command === "stop") {
+    if (rest.length !== 1) throw new Error(`Usage: psm ${command} <run-id>`);
+    const run = findRun(rest[0]);
+    if (command === "status") { console.log(JSON.stringify(run, null, 2)); return; }
+    if (!run.alive && run.state !== "starting") { console.log(JSON.stringify(run, null, 2)); return; }
+    writeJson(path.join(run.dir, "stop.json"), { token: run.token, requestedAt: now() });
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      const latest = inspectRun(run.dir);
+      if (["stopped", "failed", "interrupted"].includes(latest.state)) { console.log(JSON.stringify(latest, null, 2)); return; }
+      await delay(100);
+    }
+    throw new Error(`Stop requested but not yet confirmed; use psm status ${run.id}`);
+  }
+  if (positionals.length > 2) throw new Error("Quote the prompt as a single argument");
+  const run = await startRun(process.cwd(), positionals.at(-1)!, positionals.length === 2 ? command : undefined, values.group);
+  if (values.json) console.log(JSON.stringify(run, null, 2));
+  else console.log(`Run: ${run.id}\nState: ${run.state}\nDirectory: ${run.dir}\nReply: ${path.join(run.dir, "001.out")}`);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  main().catch((error) => { console.error(`psm: ${error.message}`); process.exitCode = 1; });
+}
