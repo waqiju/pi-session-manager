@@ -6,7 +6,7 @@ export function readJson(file: string, fallback?: any): any {
   try { return JSON.parse(readFileSync(file, "utf8")); }
   catch (error: any) {
     if (error.code === "ENOENT" && fallback !== undefined) return fallback;
-    throw new Error(`Cannot read JSON: ${file}: ${error.message}`);
+    throw new Error(`Cannot read JSON: ${file}: ${error.message}`, { cause: error });
   }
 }
 

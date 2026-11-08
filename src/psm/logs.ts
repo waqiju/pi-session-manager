@@ -155,6 +155,8 @@ export async function followLogs(dir: string, options: {
   const reader = new EventReader(path.join(dir, "logs", "events.jsonl"), options.lines);
   let formatter = new TextEvents();
   let generation = reader.generation;
+  let missingSince: number | undefined;
+  const runPath = path.join(dir, "run.json");
   const drain = async () => {
     for (const line of reader.read()) {
       if (reader.generation !== generation) {
@@ -173,8 +175,18 @@ export async function followLogs(dir: string, options: {
   while (!options.signal?.aborted) {
     await drain();
     if (!options.follow) return;
-    const run = inspectRun(dir);
-    if (["stopped", "failed", "interrupted"].includes(run.state)) {
+    let run: ReturnType<typeof inspectRun> | undefined;
+    try {
+      run = inspectRun(dir);
+      missingSince = undefined;
+    } catch (error: any) {
+      if (error.cause?.code !== "ENOENT" || error.cause?.path !== runPath) throw error;
+      missingSince ??= performance.now();
+      if (performance.now() - missingSince >= 2000) {
+        throw new Error(`Run metadata unavailable for 2 seconds: ${runPath}`, { cause: error });
+      }
+    }
+    if (run && ["stopped", "failed", "interrupted"].includes(run.state)) {
       await drain();
       options.diagnostic(`Run ${run.id}: ${run.state}${run.error ? ` (${summary(run.error)})` : ""}\n`);
       return;
