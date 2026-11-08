@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { psmHome } from "./config.ts";
 import type { Config, ModelChoice } from "./config.ts";
+import { processPresent } from "./control.ts";
 import { readJson } from "./files.ts";
 
 export interface Run {
@@ -16,6 +17,12 @@ export interface Run {
   state: "starting" | "idle" | "running" | "stopping" | "stopped" | "failed" | "interrupted";
   createdAt: string;
   updatedAt: string;
+  startedAt?: string;
+  idleSince?: string;
+  stopReason?: "requested" | "signal" | "idle_timeout" | "error";
+  restartCount?: number;
+  workerIdentity?: string;
+  piIdentity?: string;
   heartbeatAt?: string;
   workerPid?: number;
   piPid?: number;
@@ -28,15 +35,16 @@ export interface Run {
 export function alive(run: Run): boolean {
   if (!["starting", "idle", "running", "stopping"].includes(run.state) || !run.workerPid || !run.heartbeatAt) return false;
   if (Date.now() - Date.parse(run.heartbeatAt) > Math.max(10000, run.config.pollMs * 4)) return false;
-  try { process.kill(run.workerPid, 0); return true; } catch { return false; }
+  return processPresent(run.workerPid, run.workerIdentity);
 }
 
-export function inspectRun(dir: string): Run & { alive: boolean } {
+export function inspectRun(dir: string): Run & { alive: boolean; lastTurnStatus?: Record<string, any> } {
   const run: Run = readJson(path.join(dir, "run.json"));
   const living = alive(run);
   // Leave a brief startup grace period before calling a not-yet-started worker interrupted.
-  const startupGrace = run.state === "starting" && Date.now() - Date.parse(run.createdAt) < run.config.startupTimeoutMs;
-  return { ...run, state: !living && !startupGrace && ["starting", "idle", "running", "stopping"].includes(run.state) ? "interrupted" : run.state, alive: living };
+  const startupGrace = run.state === "starting" && Date.now() - Date.parse(run.startedAt || run.createdAt) < run.config.startupTimeoutMs;
+  const lastTurnStatus = run.lastTurn ? readJson(path.join(dir, `${run.lastTurn}.status.json`), null) : undefined;
+  return { ...run, ...(lastTurnStatus ? { lastTurnStatus } : {}), state: !living && !startupGrace && ["starting", "idle", "running", "stopping"].includes(run.state) ? "interrupted" : run.state, alive: living };
 }
 
 export function listRuns(home = psmHome(), all = false): ReturnType<typeof inspectRun>[] {

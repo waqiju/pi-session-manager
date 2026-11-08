@@ -1,5 +1,5 @@
 // Deterministic executable RPC fixture; no credentials or network access.
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 const args = process.argv.slice(2);
 const value = (flag: string) => args[args.indexOf(flag) + 1];
@@ -12,7 +12,13 @@ let parentId: string | null = null;
 let turn = 0;
 writeFileSync(path.join(dir, "observed.json"), JSON.stringify({ cwd: process.cwd(), agent: process.env.PI_CODING_AGENT_DIR,
   sessionDir: process.env.PI_CODING_AGENT_SESSION_DIR, parentSession: process.env.PI_SESSION_ID, args }));
-writeFileSync(session, JSON.stringify({ type: "session", version: 3, id: "fixture", timestamp: new Date().toISOString(), cwd: process.cwd() }) + "\n");
+if (existsSync(session)) {
+  const entries = readFileSync(session, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  seq = entries.filter((e) => e.type === "message").length;
+  parentId = entries.at(-1)?.id || null;
+  const prompts = path.join(dir, "prompts.jsonl");
+  turn = existsSync(prompts) ? readFileSync(prompts, "utf8").trim().split("\n").length : 0;
+} else writeFileSync(session, JSON.stringify({ type: "session", version: 3, id: "fixture", timestamp: new Date().toISOString(), cwd: process.cwd() }) + "\n");
 function message(role: string, text: string, stopReason = "stop") {
   const msg = { role, content: [{ type: "text", text }], timestamp: Date.now(), provider: model.provider, model: model.id, stopReason,
     ...(stopReason === "error" ? { errorMessage: "fixture provider failure" } : {}) };

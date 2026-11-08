@@ -5,6 +5,8 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { startRun } from "../src/psm/cli.ts";
+import { requestStop, restartRun } from "../src/psm/lifecycle.ts";
+import { submitPrompt } from "../src/psm/interaction.ts";
 import { atomicWrite, delay, readJson, writeJson } from "../src/psm/files.ts";
 import { inspectRun, listRuns } from "../src/psm/runs.ts";
 
@@ -54,7 +56,20 @@ test("real Pi RPC with isolated local OpenAI-compatible endpoint", { skip: !proc
     assert.ok(requests[1].messages.some((m: any) => m.role === "assistant" && JSON.stringify(m.content).includes("local answer 1")));
     assert.match(readFileSync(path.join(run.dir, "session.l3.md"), "utf8"), /local answer 2/);
     assert.equal(inspectRun(run.dir).archiveError, undefined);
-    writeJson(path.join(run.dir, "stop.json"), { token: run.token });
+    await requestStop(run.dir);
+    await wait(() => inspectRun(run.dir).state === "stopped");
+    const restarted = await restartRun(run.dir);
+    assert.equal(restarted.id, run.id);
+    assert.equal(restarted.restartCount, 1);
+    await submitPrompt(run.dir, "Continue after restart using prior context; do not call tools.");
+    await wait(() => readJson(path.join(run.dir, "003.status.json"), {}).state === "completed");
+    assert.equal(requests.length, 3);
+    for (const text of ["local answer 1", "local answer 2"]) {
+      assert.ok(requests[2].messages.some((m: any) => m.role === "assistant" && JSON.stringify(m.content).includes(text)));
+    }
+    assert.match(readFileSync(path.join(run.dir, "003.out.md"), "utf8"), /local answer 3/);
+    assert.match(readFileSync(path.join(run.dir, "session.l3.md"), "utf8"), /local answer 1[\s\S]*local answer 3/);
+    await requestStop(run.dir);
     await wait(() => inspectRun(run.dir).state === "stopped");
   } finally {
     for (const run of listRuns(home, true)) {

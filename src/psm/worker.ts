@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, existsSync, lstatSync, openSync, readFileSync, readdirSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -7,6 +7,7 @@ import { parseSessionFile } from "../parser.ts";
 import { refreshReplyDetails, replyDocument } from "./replies.ts";
 import { atomicWrite, delay, now, readJson, writeJson } from "./files.ts";
 import { Rpc, RpcRejection, type RecordValue } from "./rpc.ts";
+import { processIdentity, tryRunLock } from "./control.ts";
 import type { Run } from "./runs.ts";
 
 interface Turn {
@@ -19,19 +20,22 @@ interface Turn {
   aborted?: boolean;
 }
 
-export async function work(dir: string): Promise<void> {
+export async function work(dir: string, token: string): Promise<void> {
   const runPath = path.join(dir, "run.json");
   const run: Run = readJson(runPath);
-  // Workers are not restartable: an interrupted prompt may already have side effects.
-  if (run.state !== "starting" || run.workerPid) throw new Error("Run has already been claimed; automatic replay is disabled");
-  closeSync(openSync(path.join(dir, "worker.lock"), "wx", 0o600));
+  if (run.token !== token || run.state !== "starting" || run.workerPid) throw new Error("Run has already been claimed or generation changed; replay is disabled");
+  writeFileSync(path.join(dir, "worker.lock"), JSON.stringify({ token, pid: process.pid, identity: processIdentity(process.pid) }), { flag: "wx", mode: 0o600 });
   let current: Turn | undefined;
   let stopping = false;
   let fatal: string | undefined;
   let rpc: Rpc | undefined;
   const seen = new Map<string, { hash: string; since: number }>();
   const persist = () => { run.heartbeatAt = now(); writeJson(runPath, run); };
-  const transition = (state: Run["state"]) => { run.state = state; run.updatedAt = now(); persist(); };
+  const transition = (state: Run["state"]) => {
+    if (state === "idle" && run.state !== "idle") run.idleSince = now();
+    if (state === "running") delete run.idleSince;
+    run.state = state; run.updatedAt = now(); persist();
+  };
   const log = (text: string) => appendFileSync(path.join(dir, "logs", "stderr.log"), text, { mode: 0o600 });
   const archive = (pending?: { number: string; entryStart: number; entryEnd: number }) => {
     if (!existsSync(path.join(dir, "session.jsonl"))) return;
@@ -80,21 +84,24 @@ export async function work(dir: string): Promise<void> {
       finish(record.aborted || current.aborted ? "aborted" : error ? "failed" : "completed", error);
     }
   };
-  const stop = () => {
+  const stop = (reason: Run["stopReason"] = "signal") => {
     if (stopping) return;
+    run.stopReason = reason;
     stopping = true;
     // Unblock startup/acceptance waits too, not only the idle polling loop.
     rpc?.fail(new Error("Shutdown requested"));
   };
-  process.on("SIGTERM", stop);
-  process.on("SIGINT", stop);
+  const signalStop = () => stop("signal");
+  process.on("SIGTERM", signalStop);
+  process.on("SIGINT", signalStop);
   run.workerPid = process.pid;
+  run.workerIdentity = processIdentity(process.pid);
   persist();
   // Heartbeats continue while waiting for the startup RPC response.
   const heartbeat = setInterval(() => {
     try {
       persist();
-      if (existsSync(path.join(dir, "stop.json")) && readJson(path.join(dir, "stop.json")).token === run.token) stop();
+      if (existsSync(path.join(dir, "stop.json")) && readJson(path.join(dir, "stop.json")).token === run.token) stop("requested");
     } catch (e: any) { fatal = e.message; rpc?.fail(e); }
   }, 1000);
   try {
@@ -108,6 +115,7 @@ export async function work(dir: string): Promise<void> {
     rpc = new Rpc(command, { cwd: run.cwd, env, log, event });
     rpc.onFailure = (error) => { if (!stopping) fatal = error.message; };
     run.piPid = rpc.child.pid;
+    run.piIdentity = run.piPid ? processIdentity(run.piPid) : undefined;
     persist();
     const state = await rpc.request("get_state", {}, run.config.startupTimeoutMs);
     if (state?.model?.id !== run.model.model || state?.model?.provider !== run.model.provider)
@@ -115,7 +123,7 @@ export async function work(dir: string): Promise<void> {
     transition("idle");
     while (!stopping && !fatal) {
       if (existsSync(path.join(dir, "stop.json"))) {
-        if (readJson(path.join(dir, "stop.json")).token === run.token) { stopping = true; break; }
+        if (readJson(path.join(dir, "stop.json")).token === run.token) { stop("requested"); break; }
       }
       if (current && Date.now() - Date.parse(current.startedAt) > run.config.turnTimeoutMs) {
         fatal = "Turn deadline exceeded; outcome unknown, not replayed";
@@ -138,7 +146,7 @@ export async function work(dir: string): Promise<void> {
           if (!previous || previous.hash !== hash) seen.set(name, { hash, since: Date.now() });
           else if (text.trim() && Date.now() - previous.since >= run.config.stableMs) {
             current = { number: next, hash, startedAt: now(), text: "", entryStart: existsSync(path.join(dir, "session.jsonl")) ? parseSessionFile(path.join(dir, "session.jsonl")).entries.length : 0 };
-            writeJson(path.join(dir, `${next}.status.json`), { number: next, inputHash: hash, state: "running", startedAt: current.startedAt });
+            writeJson(path.join(dir, `${next}.status.json`), { number: next, inputHash: hash, state: "running", startedAt: current.startedAt, entryStart: current.entryStart });
             run.currentTurn = next;
             transition("running");
             // The listener is already installed: fast message_end/settled may precede this response.
@@ -152,6 +160,17 @@ export async function work(dir: string): Promise<void> {
             }
           }
         }
+        const idleTimeout = run.config.idleTimeoutMs ?? 86400000;
+        if (!current && idleTimeout > 0 && run.idleSince && Date.now() - Date.parse(run.idleSince) >= idleTimeout) {
+          const release = tryRunLock(dir);
+          if (release) {
+            try {
+              // Re-read under the publisher's lock: accepted input always wins over idle expiry.
+              const pending = readdirSync(dir).some((n) => /^\d+\.in\.md$/.test(n) && Number(n.split(".")[0]) > Number(run.lastTurn || 0));
+              if (!pending) { stop("idle_timeout"); transition("stopping"); }
+            } finally { release(); }
+          }
+        }
       }
       await delay(run.config.pollMs);
     }
@@ -160,16 +179,17 @@ export async function work(dir: string): Promise<void> {
     stopping = true;
     transition("stopping");
     if (current) finish("interrupted", fatal || "Stopped; prompt may have partially executed");
-    await rpc?.close();
+    try { await rpc?.close(); }
+    catch (error: any) { fatal = fatal || error.message; }
     archive();
-    if (fatal) { run.error = fatal; log(`${fatal}\n`); }
+    if (fatal) { run.error = fatal; run.stopReason = "error"; log(`${fatal}\n`); }
     transition(fatal ? "failed" : "stopped");
     clearInterval(heartbeat);
-    process.off("SIGTERM", stop);
-    process.off("SIGINT", stop);
+    process.off("SIGTERM", signalStop);
+    process.off("SIGINT", signalStop);
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  work(path.resolve(process.argv[2])).catch((error) => { console.error(error.message); process.exitCode = 1; });
+  work(path.resolve(process.argv[2]), process.argv[3]).catch((error) => { console.error(error.message); process.exitCode = 1; });
 }

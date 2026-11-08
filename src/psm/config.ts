@@ -13,6 +13,7 @@ export interface Config {
   stableMs: number;
   startupTimeoutMs: number;
   turnTimeoutMs: number;
+  idleTimeoutMs: number;
 }
 
 export function psmHome(): string { return path.resolve(process.env.PSM_HOME || path.join(homedir(), ".psm")); }
@@ -41,10 +42,10 @@ export function loadConfig(cwd: string, home = psmHome()) {
     return merge(global, project);
   };
   const raw = load("config.json");
-  const allowed = new Set(["defaultModel", "models", "piCommand", "pollMs", "stableMs", "startupTimeoutMs", "turnTimeoutMs"]);
+  const allowed = new Set(["defaultModel", "models", "piCommand", "pollMs", "stableMs", "startupTimeoutMs", "turnTimeoutMs", "idleTimeoutMs"]);
   for (const key of Object.keys(raw)) if (!allowed.has(key)) throw new Error(`Unknown PSM config field: ${key}`);
   const config: Config = { models: {}, piCommand: ["pi"], pollMs: 500, stableMs: 1000,
-    startupTimeoutMs: 30000, turnTimeoutMs: 3600000, ...raw };
+    startupTimeoutMs: 30000, turnTimeoutMs: 3600000, idleTimeoutMs: 86400000, ...raw };
   if (!Array.isArray(config.piCommand) || !config.piCommand.length || config.piCommand.some((s) => typeof s !== "string" || !s))
     throw new Error("piCommand must be a nonempty argv array");
   if (!object(config.models)) throw new Error("config.models must be an alias map");
@@ -52,6 +53,8 @@ export function loadConfig(cwd: string, home = psmHome()) {
   for (const key of ["pollMs", "stableMs", "startupTimeoutMs", "turnTimeoutMs"] as const) {
     if (!Number.isSafeInteger(config[key]) || config[key] < 10) throw new Error(`${key} must be an integer >= 10`);
   }
+  if (!Number.isSafeInteger(config.idleTimeoutMs) || config.idleTimeoutMs < 0)
+    throw new Error("idleTimeoutMs must be an integer >= 0 (0 disables idle shutdown)");
   let modelsFile: string | undefined;
   for (const directory of [...new Set([local, home])]) {
     const candidate = path.resolve(directory, "models.json");

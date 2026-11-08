@@ -81,6 +81,8 @@ export class Rpc {
     if (!this.closed) this.signal("SIGTERM");
     for (let i = 0; i < 20 && !this.closed; i++) await delay(100);
     if (!this.closed) this.signal("SIGKILL");
+    for (let i = 0; i < 20 && !this.closed; i++) await delay(100);
+    if (!this.closed) throw new Error("Pi exit not confirmed after shutdown");
   }
 
   signal(signal: NodeJS.Signals): void {

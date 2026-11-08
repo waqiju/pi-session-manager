@@ -8,6 +8,7 @@ psm "首条 prompt"                       # config.defaultModel
 psm list [--all] [--group research] [--json]
 psm status 1                           # 1 / 01 / 000001 均指向 000001
 psm stop 1
+psm restart 1 [--json]                 # 恢复原会话，不重放中断轮次
 psm open 1                             # 系统默认应用打开 L1
 psm open 1 --level l3
 psm prompt 1 "继续分析" [--json]
@@ -15,7 +16,7 @@ psm prompt 1 --file ./prompt.md [--json]
 psm --help
 ```
 
-prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`open`、`prompt` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型别名消除歧义。
+prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`restart`、`open`、`prompt` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型别名消除歧义。
 
 默认 `list` 显示最近 24 小时有活动的 run，加上所有仍存活的 run；`--all` 显示全部注册历史。注册表跨 cwd，位于 `~/.psm/registry/`。已删除 run 目录的记录跳过。所有按 run 操作的命令接受 1～6 位数字简写，补齐六位后精确匹配；0 或超过六位的数字无效，数字不作前缀查询。历史非数字 ID 仍可用唯一前缀。status 输出 JSON；stop 最多等待 10 秒，超时返回非零并提示停止请求尚未确认。
 
@@ -27,7 +28,24 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
 
 `psm prompt 1 "文本"` 与 `psm prompt 1 --file ./prompt.md` 二选一。文件相对 CLI 当前目录解析，UTF-8 内容原样读取，不执行附件展开。空白 prompt 拒绝；以 `-` 开头的文本使用 `psm prompt 1 -- "-文本"`。命令返回已发布的轮次及输入/输出路径，`--json` 返回结构化结果；这只代表入队，不代表模型完成。
 
-同一 run 的 CLI 提交通过 `prompt.lock/` 串行分配连续编号，临时文件写完后以不覆盖目标的原子硬链接发布，最后移除临时文件。手工文件若抢先占用编号，命令报错而不覆盖；已有编号缺口需先修复。锁等待最多 5 秒；若提交进程强制退出遗留锁，确认该提交进程已退出后可删除 `prompt.lock/` 再试。仅接受存活的 idle/running run；running 时排队，不作 steering，不恢复已停止的 run。与停止并发时，已发布输入也可能留在队列未执行，应检查状态。
+同一 run 的 CLI 提交通过 `control.lock/` 串行分配连续编号，并与停止请求、restart 和 idle 超时判定互斥。临时文件写完后以不覆盖目标的原子硬链接发布，最后移除临时文件。手工文件若抢先占用编号，命令报错而不覆盖；已有编号缺口需先修复。锁等待最多 5 秒；持锁进程意外退出可能遗留锁，查看 `control.lock/owner.json` 并确认所属进程已退出后才能删除该目录重试，不自动按锁年龄回收。仅接受存活的 idle/running run；running 时排队，不作 steering，不隐式恢复已停止的 run。与手动停止并发时，已发布输入也可能留在队列未执行，应检查状态。
+
+## 空闲停止与恢复
+
+`idleTimeoutMs` 默认 `86400000`（24 小时），设为 `0` 禁用。从每次进入 idle 的 `idleSince` 起计时，心跳、status/list/open 不重置计时。只在没有正在执行的轮次、也没有更高编号的 `.in.md` 时停止；已有队列先消费。空白输入或缺号导致的等待也视为仍有待处理输入，需要修复输入后才能正常消费或自动停止。停止原因记为 `idle_timeout`，会话及结果文件保留。list 的 24 小时筛选与该超时独立：刚停止的 run 仍显示，停止超过 24 小时且无新状态更新后默认隐藏，`--all` 可查看。
+
+`psm restart <id>` 仅接受 stopped / failed / interrupted。命令保留原 ID、目录、cwd、模型、配置和认证快照，通过原 `session.jsonl` 恢复上下文；环境变量来自本次 CLI，models.json 的符号链接仍指向原文件。旧配置快照缺少 idleTimeoutMs 时补 24 小时默认值。已经运行的旧版 worker 不会热更新，需停止后 restart 才使用新版逻辑。
+
+恢复前验证旧 worker / Pi / 启动进程已退出，单纯心跳过期不会允许启动第二个 worker。新记录携带进程启动身份以区分 PID 复用；旧记录缺少身份时保守拒绝仍存在的 PID。成功领取后更换 token，清理旧停止请求及 worker 声明，记录本次 startedAt 和 restartCount，等待 Pi 就绪后返回。并发 restart 只有一个能启动；正常运行的 run 应先 stop。
+
+- 已有终态轮次保留；崩溃残留 running 检查点改为 interrupted，保留输入摘要和诊断，不重新发送。
+- 按检查点恢复 lastTurn，即使崩溃时 run.json 尚未记录最后完成轮次，也不会重复消费。
+- 尚未开始的排队输入继续串行消费。命令输出 `pendingTurns`（恢复时的队列快照，不是实时剩余队列）；没有队列则进入 idle，等待 prompt。
+- 恢复历史写入 `logs/restarts.jsonl`，含前次 run 元数据和排队轮次；lastTurnStatus 显示最近结束轮次，stopReason 区分 requested / signal / idle_timeout / error。
+- 原会话缺失或损坏、执行检查点缺失时明确报错，不静默新建会话。尚未创建任何持久上下文的启动失败可重新启动。
+- 恢复不自动重放中断轮次，不回滚副作用，不恢复被中断的工具进程。崩溃可能留下已写出的 `.out.md`，应以 `.status.json` 的 completed 为完成依据。
+
+不提供 `continue` 别名；`restart` 管理进程与会话恢复，`prompt` 提交下一轮任务。
 
 ## 配置优先级
 
@@ -56,7 +74,8 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
   "pollMs": 500,
   "stableMs": 1000,
   "startupTimeoutMs": 30000,
-  "turnTimeoutMs": 3600000
+  "turnTimeoutMs": 3600000,
+  "idleTimeoutMs": 86400000
 }
 ```
 
@@ -64,7 +83,7 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
 
 `piCommand` 是可执行文件与前置参数的 argv 数组，不经过 shell。默认使用 PATH 中的 `pi`；也可配置 `["/absolute/path/to/pi"]` 或 `["node", "/absolute/path/to/pi/cli.js"]`。不要在 argv 中放凭据。未知配置字段会报错。
 
-所有时长单位为毫秒，必须是 >= 10 的整数。`startupTimeoutMs` 也用于 RPC 命令接受响应超时。`turnTimeoutMs` 限制整轮执行，默认一小时，超时后停止该 run 并标记未确认结果，不自动重试输入。
+所有时长单位为毫秒；idleTimeoutMs 必须是 >= 0 的整数，0 禁用空闲停止，其他时长必须是 >= 10 的整数。`startupTimeoutMs` 也用于 RPC 命令接受响应超时。`turnTimeoutMs` 限制整轮执行，默认一小时，超时后停止该 run 并标记未确认结果，不自动重试输入。
 
 例如通过 PSM 配置兼容 endpoint：
 
@@ -91,8 +110,10 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
 
 ```text
 .psm/runs/<group>/<six-digit-id>/
-  run.json                  # 运行状态、cwd、有效 PSM 配置、PID、心跳
-  worker.lock               # 永久独占声明；不支持同 run 重启
+  run.json                  # 状态、cwd、配置、进程身份、心跳、idleSince、restartCount
+  worker.lock               # 当前 worker 的独占声明；确认旧进程退出后由 restart 更换
+  launch.json               # 最近一次启动的 worker PID、身份和 token
+  control.lock/owner.json   # 临时控制锁；协调 prompt、stop、restart 和 idle 停止
   agent/                    # 独立配置；models.json 为源文件的符号链接
   session.jsonl             # Pi 原生会话
   session.l1.md             # 完整会话的阅读归档
@@ -104,6 +125,7 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
   logs/
     events.jsonl            # 原始 RPC 响应和事件
     stderr.log              # Pi/worker 诊断
+    restarts.jsonl          # 恢复前的 run 状态及队列历史
   stop.json                 # 停止请求，由 psm stop 生成
 ```
 

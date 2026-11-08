@@ -16,6 +16,7 @@ psm open 1                       # 使用 garden 的系统打开器查看 L1
 psm prompt 1 "继续分析"           # 自动追加下一轮，运行中则排队
 psm prompt 1 --file ./prompt.md   # 多行 prompt
 psm stop 1
+psm restart 1                    # 重新启动 worker，恢复原会话；不重放中断轮次
 ```
 
 先在 `~/.psm/config.json` 配置模型别名，例如：
@@ -37,7 +38,12 @@ psm stop 1
 Pi 在调用命令时的 cwd 工作；首轮结果为 `001.out.md`，多轮交互通过依次创建 `002.in.md`、
 `003.in.md` 等文件提交，编号最多到 `999`。推荐先写临时文件再重命名为 `.in.md`。
 每轮串行执行，成功后生成对应 `.out.md`，frontmatter 提供本轮 L1 详情的起止行号，状态见 `.status.json`；自动维护 `session.jsonl`、
-`session.l1.md` 和 `session.l3.md`。空闲进程持续等待，使用 `psm stop` 结束。
+`session.l1.md` 和 `session.l3.md`。连续空闲且无待消费输入满 24 小时后自动停止，文件保留；
+可用 `idleTimeoutMs` 调整时长，设为 `0` 禁用，也可随时执行 `psm stop`。
+
+`psm restart 1` 恢复已停止、失败或中断的 run，沿用原 ID、目录和会话上下文。
+中断轮次跳过，尚未开始的排队输入继续消费；没有排队输入时等待下一条 `psm prompt`。
+恢复不会回滚工具副作用，也不会从工具中断现场续跑。
 
 PSM 默认关闭自动加载的 Pi 插件、skills 和 MCP，保留默认工具与 cwd 的 AGENTS.md 上下文。
 第一期不提供自定义 system prompt 或崩溃自动重放。

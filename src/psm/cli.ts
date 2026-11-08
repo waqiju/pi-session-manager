@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-import { closeSync, mkdirSync, openSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { mkdirSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { loadConfig, selectModel } from "./config.ts";
 import { atomicWrite, delay, now, writeJson } from "./files.ts";
 import { formatRuns } from "./table.ts";
 import { openFile } from "../open.ts";
+import { launchWorker, requestStop, restartRun } from "./lifecycle.ts";
 import { archiveFile, submitPrompt } from "./interaction.ts";
 import { allocateRunId, findRun, inspectRun, listRuns, type Run } from "./runs.ts";
 
@@ -22,6 +22,7 @@ const usage = `psm — file-driven background Pi sessions (Pi >= 1.5; Linux/WSL/
   psm prompt <run-id> <text>         Submit the next turn (queued while running)
   psm prompt <run-id> --file <path>   Read a UTF-8 prompt file
   psm stop <run-id>                  Request shutdown and wait up to 10 seconds
+  psm restart <run-id> [--json]      Restart worker, resume session; never replay interrupted turns
 
 Quote each prompt as one argument; use -- before a prompt starting with '-'.
 Configure ~/.psm/config.json and ./.psm/config.json (local overrides global).
@@ -44,31 +45,11 @@ export async function startRun(cwd: string, prompt: string, alias?: string, grou
   writeJson(path.join(agent, "auth.json"), loaded.auth);
   writeJson(path.join(agent, "settings.json"), { packages: [], quietStartup: true });
   const run: Run = { schema: 1, id, token: randomUUID(), dir, cwd, group, model, config: loaded.config,
-    state: "starting", createdAt: now(), updatedAt: now() };
+    state: "starting", createdAt: now(), startedAt: now(), updatedAt: now(), restartCount: 0 };
   writeJson(path.join(dir, "run.json"), run);
   atomicWrite(path.join(dir, "001.in.md"), prompt);
   writeJson(path.join(loaded.home, "registry", `${id}.json`), { id, dir });
-  const log = openSync(path.join(dir, "logs", "stderr.log"), "a", 0o600);
-  try {
-    const child = spawn(process.execPath, [fileURLToPath(new URL("./worker.ts", import.meta.url)), dir], {
-      cwd, detached: true, stdio: ["ignore", log, log], env: process.env,
-    });
-    await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
-    child.unref();
-  } catch (error: any) {
-    run.state = "failed"; run.error = error.message; run.updatedAt = now();
-    writeJson(path.join(dir, "run.json"), run);
-    throw new Error(`Worker startup failed: ${error.message}; run directory: ${dir}`);
-  } finally { closeSync(log); }
-  const deadline = Date.now() + loaded.config.startupTimeoutMs + 2000;
-  while (Date.now() < deadline) {
-    const latest = inspectRun(dir);
-    if (latest.state === "idle" || latest.state === "running") return latest;
-    if (["failed", "stopped", "interrupted"].includes(latest.state)) throw new Error(`${latest.error || latest.state}; run directory: ${dir}`);
-    await delay(100);
-  }
-  writeJson(path.join(dir, "stop.json"), { token: run.token, requestedAt: now() });
-  throw new Error(`Startup timed out; shutdown requested. Inspect ${dir}/logs/stderr.log`);
+  return launchWorker(run);
 }
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
@@ -100,6 +81,13 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
     return;
   }
+  if (command === "restart") {
+    if (rest.length !== 1 || values.all || values.group) throw new Error("Usage: psm restart <run-id> [--json]");
+    const run = await restartRun(findRun(rest[0]).dir);
+    if (values.json) console.log(JSON.stringify(run, null, 2));
+    else console.log(`Run: ${run.id}\nState: ${run.state}\nDirectory: ${run.dir}\nRestart count: ${run.restartCount}\nPending turns at restart: ${run.pendingTurns.join(", ") || "none"}\nInterrupted turns are not replayed.`);
+    return;
+  }
   if (command === "list") {
     if (rest.length) throw new Error("Usage: psm list [--all] [--group name] [--json]");
     const runs = listRuns(undefined, values.all).filter((run) => !values.group || run.group === values.group);
@@ -112,8 +100,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     if (rest.length !== 1) throw new Error(`Usage: psm ${command} <run-id>`);
     const run = findRun(rest[0]);
     if (command === "status") { console.log(JSON.stringify(run, null, 2)); return; }
-    if (!run.alive && run.state !== "starting") { console.log(JSON.stringify(run, null, 2)); return; }
-    writeJson(path.join(run.dir, "stop.json"), { token: run.token, requestedAt: now() });
+    const requested = await requestStop(run.dir);
+    if (!requested.alive && requested.state !== "starting") { console.log(JSON.stringify(requested, null, 2)); return; }
     const deadline = Date.now() + 10000;
     while (Date.now() < deadline) {
       const latest = inspectRun(run.dir);
