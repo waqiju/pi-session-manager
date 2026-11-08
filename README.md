@@ -11,8 +11,11 @@ npm install --ignore-scripts --legacy-peer-deps
 npm link --ignore-scripts --legacy-peer-deps
 psm deepseek "分析当前项目结构"    # 就绪后返回 run ID 和目录，在后台继续执行
 psm list                         # 最近 24 小时有活动的 run + 所有存活 run
-psm status <run-id>
-psm stop <run-id>
+psm status 1                     # 数字 ID 自动补齐为 000001
+psm open 1                       # 使用 garden 的系统打开器查看 L1
+psm prompt 1 "继续分析"           # 自动追加下一轮，运行中则排队
+psm prompt 1 --file ./prompt.md   # 多行 prompt
+psm stop 1
 ```
 
 先在 `~/.psm/config.json` 配置模型别名，例如：
@@ -31,9 +34,9 @@ psm stop <run-id>
 完整配置示例见 [PSM 参考](wiki/internals/reference/psm.md)。
 
 每个 run 存放在 `<cwd>/.psm/runs/<group>/<run-id>/`，默认 group 为 `default`。
-Pi 在调用命令时的 cwd 工作；首轮结果为 `001.out`，多轮交互通过依次创建 `002.in`、
-`003.in` 等文件提交，编号最多到 `999`。推荐先写临时文件再重命名为 `.in`。
-每轮串行执行，成功后生成对应 `.out`，状态见 `.status.json`；自动维护 `session.jsonl`、
+Pi 在调用命令时的 cwd 工作；首轮结果为 `001.out.md`，多轮交互通过依次创建 `002.in.md`、
+`003.in.md` 等文件提交，编号最多到 `999`。推荐先写临时文件再重命名为 `.in.md`。
+每轮串行执行，成功后生成对应 `.out.md`，frontmatter 提供本轮 L1 详情的起止行号，状态见 `.status.json`；自动维护 `session.jsonl`、
 `session.l1.md` 和 `session.l3.md`。空闲进程持续等待，使用 `psm stop` 结束。
 
 PSM 默认关闭自动加载的 Pi 插件、skills 和 MCP，保留默认工具与 cwd 的 AGENTS.md 上下文。

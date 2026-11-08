@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-PSM 1.0 增加全局 `psm` CLI：独立后台 worker 管理 Pi RPC，通过编号 `.in/.out` 文件进行多轮交互，数据保存在调用目录的 `.psm/runs/`。
+PSM 1.0 增加全局 `psm` CLI：独立后台 worker 管理 Pi RPC，通过编号 `.in.md/.out.md` 文件进行多轮交互，数据保存在调用目录的 `.psm/runs/`。
 改 PSM 代码前先读 [PSM 架构](wiki/internals/concepts/psm.md) 与 [配置/协议](wiki/internals/reference/psm.md)。
 
 garden（pi-session-manager）：把 pi 的 session 记录（`.jsonl`，机器格式、人类阅读困难）

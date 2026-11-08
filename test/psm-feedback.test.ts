@@ -41,7 +41,11 @@ test("legacy UUID lookup and exact matches take precedence over prefixes", (t) =
   }
   assert.equal(findRun("000001", root).id, "000001");
   assert.match(findRun("984dbb89", root).id, /^984dbb89-/);
-  assert.throws(() => findRun("000", root), /Ambiguous/);
+  assert.equal(findRun("1", root).id, "000001");
+  assert.equal(findRun("01", root).id, "000001");
+  assert.throws(() => findRun("000", root), /Invalid run ID/);
+  assert.throws(() => findRun("1000000", root), /Invalid run ID/);
+  assert.throws(() => findRun("99", root), /Run not found: 000099/);
 });
 
 test("new runs link the selected models file without copying it", async (t) => {

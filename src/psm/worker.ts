@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { archiveSession } from "../archive.ts";
+import { parseSessionFile } from "../parser.ts";
+import { refreshReplyDetails, replyDocument } from "./replies.ts";
 import { atomicWrite, delay, now, readJson, writeJson } from "./files.ts";
 import { Rpc, RpcRejection, type RecordValue } from "./rpc.ts";
 import type { Run } from "./runs.ts";
@@ -12,6 +14,7 @@ interface Turn {
   hash: string;
   startedAt: string;
   text: string;
+  entryStart: number;
   error?: string;
   aborted?: boolean;
 }
@@ -30,22 +33,33 @@ export async function work(dir: string): Promise<void> {
   const persist = () => { run.heartbeatAt = now(); writeJson(runPath, run); };
   const transition = (state: Run["state"]) => { run.state = state; run.updatedAt = now(); persist(); };
   const log = (text: string) => appendFileSync(path.join(dir, "logs", "stderr.log"), text, { mode: 0o600 });
-  const archive = () => {
+  const archive = (pending?: { number: string; entryStart: number; entryEnd: number }) => {
     if (!existsSync(path.join(dir, "session.jsonl"))) return;
-    try { archiveSession(path.join(dir, "session.jsonl"), path.join(dir, "session")); delete run.archiveError; }
-    catch (error: any) { run.archiveError = error.message; log(`Archive: ${error.message}\n`); }
+    try {
+      const lines = archiveSession(path.join(dir, "session.jsonl"), path.join(dir, "session"));
+      refreshReplyDetails(dir, lines, pending);
+      delete run.archiveError;
+    }
+    catch (error: any) {
+      run.archiveError = error.message; log(`Archive: ${error.message}\n`);
+      try { refreshReplyDetails(dir, undefined, pending); }
+      catch (refreshError: any) { log(`Reply details: ${refreshError.message}\n`); }
+    }
   };
   const finish = (state: string, error?: string) => {
     if (!current) return;
     const turn = current;
-    if (state === "completed") atomicWrite(path.join(dir, `${turn.number}.out`), turn.text);
-    writeJson(path.join(dir, `${turn.number}.status.json`), {
+    if (state === "completed") atomicWrite(path.join(dir, `${turn.number}.out.md`), replyDocument(turn.number, turn.text));
+    const status = {
+      entryStart: turn.entryStart,
+      entryEnd: existsSync(path.join(dir, "session.jsonl")) ? parseSessionFile(path.join(dir, "session.jsonl")).entries.length : turn.entryStart,
       number: turn.number, inputHash: turn.hash, state, startedAt: turn.startedAt, endedAt: now(), ...(error ? { error } : {}),
-    });
+    };
+    archive(status);
+    writeJson(path.join(dir, `${turn.number}.status.json`), status);
     current = undefined;
     run.lastTurn = turn.number;
     delete run.currentTurn;
-    archive();
     if (!stopping) transition("idle");
   };
   const event = (record: RecordValue) => {
@@ -108,12 +122,12 @@ export async function work(dir: string): Promise<void> {
         break;
       }
       if (!current) {
-        const names = readdirSync(dir).filter((name) => /^\d+\.in$/.test(name)).sort();
+        const names = readdirSync(dir).filter((name) => /^\d+\.in\.md$/.test(name)).sort();
         for (const name of names) {
-          if (!/^(?!000)\d{3}\.in$/.test(name)) throw new Error(`Invalid input number: ${name}; use 001.in through 999.in`);
+          if (!/^(?!000)\d{3}\.in\.md$/.test(name)) throw new Error(`Invalid input number: ${name}; use 001.in.md through 999.in.md`);
         }
         const next = String(Number(run.lastTurn || 0) + 1).padStart(3, "0");
-        const name = `${next}.in`;
+        const name = `${next}.in.md`;
         if (names.includes(name)) {
           const file = path.join(dir, name);
           if (!lstatSync(file).isFile()) throw new Error(`Input must be a regular file: ${name}`);
@@ -123,7 +137,7 @@ export async function work(dir: string): Promise<void> {
           const previous = seen.get(name);
           if (!previous || previous.hash !== hash) seen.set(name, { hash, since: Date.now() });
           else if (text.trim() && Date.now() - previous.since >= run.config.stableMs) {
-            current = { number: next, hash, startedAt: now(), text: "" };
+            current = { number: next, hash, startedAt: now(), text: "", entryStart: existsSync(path.join(dir, "session.jsonl")) ? parseSessionFile(path.join(dir, "session.jsonl")).entries.length : 0 };
             writeJson(path.join(dir, `${next}.status.json`), { number: next, inputHash: hash, state: "running", startedAt: current.startedAt });
             run.currentTurn = next;
             transition("running");

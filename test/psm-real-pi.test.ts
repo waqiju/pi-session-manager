@@ -45,10 +45,10 @@ test("real Pi RPC with isolated local OpenAI-compatible endpoint", { skip: !proc
   try {
     const run = await startRun(cwd, "Reply briefly; do not call tools.");
     for (const n of ["001", "002"]) {
-      if (n === "002") atomicWrite(path.join(run.dir, "002.in"), "Reply again using prior context; do not call tools.");
+      if (n === "002") atomicWrite(path.join(run.dir, "002.in.md"), "Reply again using prior context; do not call tools.");
       await wait(() => ["completed", "failed", "interrupted"].includes(readJson(path.join(run.dir, `${n}.status.json`), {}).state));
       assert.equal(readJson(path.join(run.dir, `${n}.status.json`)).state, "completed");
-      assert.equal(readFileSync(path.join(run.dir, `${n}.out`), "utf8"), `local answer ${Number(n)}`);
+      assert.equal(readFileSync(path.join(run.dir, `${n}.out.md`), "utf8").replace(/^---\n[\s\S]*?\n---\n\n/, ""), `local answer ${Number(n)}`);
     }
     assert.equal(requests.length, 2);
     assert.ok(requests[1].messages.some((m: any) => m.role === "assistant" && JSON.stringify(m.content).includes("local answer 1")));

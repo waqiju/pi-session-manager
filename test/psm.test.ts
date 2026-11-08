@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { loadConfig, merge, selectModel } from "../src/psm/config.ts";
 import { startRun } from "../src/psm/cli.ts";
 import { alive, findRun, inspectRun, listRuns } from "../src/psm/runs.ts";
+import { archiveFile, submitPrompt } from "../src/psm/interaction.ts";
 import { atomicWrite, delay, readJson, writeJson } from "../src/psm/files.ts";
 
 const fixture = fileURLToPath(new URL("./fixtures/psm-fake-pi.ts", import.meta.url));
@@ -42,6 +43,58 @@ function setup(t: any, extra = {}) {
   return { root, home, cwd };
 }
 const status = (dir: string, n: string) => readJson(path.join(dir, `${n}.status.json`), {});
+
+test("prompt CLI queues concurrent UTF-8 inputs and open uses garden's configured opener", async (t) => {
+  const { cwd, root } = setup(t, { stableMs: 300 });
+  const run = await startRun(cwd, "first");
+  const cli = fileURLToPath(new URL("../src/psm/cli.ts", import.meta.url));
+  const exec = promisify(execFile);
+  const promptFile = path.join(root, "multi line.md");
+  writeFileSync(promptFile, "中文\nsecond line\n");
+  const results = await Promise.all([
+    exec(process.execPath, [cli, "prompt", "1", "--file", promptFile, "--json"], { cwd: root }),
+    exec(process.execPath, [cli, "prompt", "01", "third", "--json"], { cwd: root }),
+  ]);
+  const published = results.map((r) => JSON.parse(r.stdout));
+  assert.deepEqual(published.map((r) => r.number).sort(), ["002", "003"]);
+  assert.equal(readFileSync(published[0].input, "utf8"), "中文\nsecond line\n");
+  await until(() => status(run.dir, "003").state === "completed");
+  for (const n of ["001", "002", "003"]) {
+    const reply = readFileSync(path.join(run.dir, `${n}.out.md`), "utf8");
+    const start = Number(reply.match(/detail_start_line: (\d+)/)![1]);
+    const end = Number(reply.match(/detail_end_line: (\d+)/)![1]);
+    const detail = readFileSync(path.join(run.dir, "session.l1.md"), "utf8").split("\n").slice(start - 1, end).join("\n");
+    assert.match(detail, /^## 🙋 User/);
+    assert.equal((detail.match(/## 🙋 User/g) || []).length, 1);
+    assert.match(detail, new RegExp(`reply ${Number(n)}:`));
+  }
+  assert.equal(archiveFile(run.dir), path.join(run.dir, "session.l1.md"));
+  assert.throws(() => archiveFile(run.dir, "l2"), /l1 or l3/);
+  const opener = path.join(root, "opener.mjs");
+  const opened = path.join(root, "opened.json");
+  writeFileSync(opener, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(opened)}, JSON.stringify(process.argv.slice(2)));`);
+  const env = { ...process.env, PI_GARDEN_OPEN_CMD: `${process.execPath} ${opener}` };
+  await exec(process.execPath, [cli, "open", "1"], { cwd: root, env });
+  await until(() => existsSync(opened));
+  assert.deepEqual(readJson(opened), [path.join(run.dir, "session.l1.md")]);
+  rmSync(opened);
+  await exec(process.execPath, [cli, "open", "1", "--level", "l3"], { cwd: root, env });
+  await until(() => existsSync(opened));
+  assert.deepEqual(readJson(opened), [path.join(run.dir, "session.l3.md")]);
+  await assert.rejects(exec(process.execPath, [cli, "prompt", "1", "text", "--file", promptFile]), /Usage/);
+  await assert.rejects(submitPrompt(run.dir, " \n"), /empty/);
+  await exec(process.execPath, [cli, "stop", "1"], { cwd: root });
+  await assert.rejects(submitPrompt(run.dir, "late"), /Cannot submit/);
+});
+
+test("archive failure preserves successful reply with unavailable detail marker", async (t) => {
+  const { cwd } = setup(t, { stableMs: 300 });
+  const run = await startRun(cwd, "first");
+  mkdirSync(path.join(run.dir, "session.l1.md"));
+  await until(() => status(run.dir, "001").state === "completed");
+  assert.ok(inspectRun(run.dir).archiveError);
+  assert.match(readFileSync(path.join(run.dir, "001.out.md"), "utf8"), /detail_status: unavailable[\s\S]*reply 1: first/);
+});
 
 test("configuration merges ordinary fields and selects a whole models file", (t) => {
   const { home, cwd } = setup(t);
@@ -78,19 +131,19 @@ test("detached RPC: serial files, no early agent_end completion, UTF-8, archives
   assert.equal(observed.agent, path.join(run.dir, "agent"));
   assert.equal(observed.parentSession, undefined);
   assert.ok(observed.args.includes("--no-extensions"));
-  atomicWrite(path.join(run.dir, "002.in"), "second");
+  atomicWrite(path.join(run.dir, "002.in.md"), "second");
   await until(() => status(run.dir, "001").state === "running");
-  assert.equal(existsSync(path.join(run.dir, "001.out")), false);
+  assert.equal(existsSync(path.join(run.dir, "001.out.md")), false);
   await until(() => status(run.dir, "002").state === "completed");
-  assert.equal(readFileSync(path.join(run.dir, "001.out"), "utf8"), "reply 1: first 中文\u2028line");
-  assert.equal(readFileSync(path.join(run.dir, "002.out"), "utf8"), "reply 2: second");
+  assert.equal(readFileSync(path.join(run.dir, "001.out.md"), "utf8").replace(/^---\n[\s\S]*?\n---\n\n/, ""), "reply 1: first 中文\u2028line");
+  assert.equal(readFileSync(path.join(run.dir, "002.out.md"), "utf8").replace(/^---\n[\s\S]*?\n---\n\n/, ""), "reply 2: second");
   for (const level of ["l1", "l3"]) assert.match(readFileSync(path.join(run.dir, `session.${level}.md`), "utf8"), /second/);
   assert.ok(existsSync(path.join(run.dir, "logs/events.jsonl")));
   assert.equal(inspectRun(run.dir).archiveError, undefined);
   assert.equal(listRuns(home)[0].id, run.id);
   assert.equal(findRun(run.id.slice(0, 8), home).id, run.id);
   // Editing an already consumed input must not resubmit it.
-  atomicWrite(path.join(run.dir, "001.in"), "edited");
+  atomicWrite(path.join(run.dir, "001.in.md"), "edited");
   await delay(200);
   assert.equal(readFileSync(path.join(run.dir, "prompts.jsonl"), "utf8").trim().split("\n").length, 2);
   writeJson(path.join(run.dir, "stop.json"), { token: run.token });
@@ -102,17 +155,17 @@ test("fast completion before acceptance response, handled commands, failed and a
   const { cwd } = setup(t);
   const run = await startRun(cwd, "fast");
   await until(() => status(run.dir, "001").state === "completed");
-  atomicWrite(path.join(run.dir, "002.in"), "handled");
+  atomicWrite(path.join(run.dir, "002.in.md"), "handled");
   await until(() => status(run.dir, "002").state === "handled");
-  atomicWrite(path.join(run.dir, "003.in"), "error");
+  atomicWrite(path.join(run.dir, "003.in.md"), "error");
   await until(() => status(run.dir, "003").state === "failed");
   assert.match(status(run.dir, "003").error, /provider failure/);
-  assert.equal(existsSync(path.join(run.dir, "003.out")), false);
-  atomicWrite(path.join(run.dir, "004.in"), "abort");
+  assert.equal(existsSync(path.join(run.dir, "003.out.md")), false);
+  atomicWrite(path.join(run.dir, "004.in.md"), "abort");
   await until(() => status(run.dir, "004").state === "aborted");
-  atomicWrite(path.join(run.dir, "005.in"), "recovered");
+  atomicWrite(path.join(run.dir, "005.in.md"), "recovered");
   await until(() => status(run.dir, "005").state === "completed");
-  atomicWrite(path.join(run.dir, "006.in"), "reject");
+  atomicWrite(path.join(run.dir, "006.in.md"), "reject");
   await until(() => status(run.dir, "006").state === "failed");
   assert.match(status(run.dir, "006").error, /rejection/);
   assert.equal(inspectRun(run.dir).state, "idle");
@@ -122,15 +175,15 @@ test("incomplete files wait for stability and missing sequence; invalid numbers 
   const { cwd } = setup(t, { stableMs: 250 });
   const run = await startRun(cwd, "first");
   await until(() => status(run.dir, "001").state === "completed");
-  atomicWrite(path.join(run.dir, "003.in"), "third");
-  writeFileSync(path.join(run.dir, "002.in"), "partial");
+  atomicWrite(path.join(run.dir, "003.in.md"), "third");
+  writeFileSync(path.join(run.dir, "002.in.md"), "partial");
   await delay(100);
-  writeFileSync(path.join(run.dir, "002.in"), "complete");
+  writeFileSync(path.join(run.dir, "002.in.md"), "complete");
   await delay(100);
   assert.equal(status(run.dir, "002").state, undefined);
   await until(() => status(run.dir, "003").state === "completed");
-  assert.match(readFileSync(path.join(run.dir, "002.out"), "utf8"), /complete/);
-  atomicWrite(path.join(run.dir, "1000.in"), "overflow");
+  assert.match(readFileSync(path.join(run.dir, "002.out.md"), "utf8"), /complete/);
+  atomicWrite(path.join(run.dir, "1000.in.md"), "overflow");
   await until(() => inspectRun(run.dir).state === "failed");
   assert.match(inspectRun(run.dir).error!, /Invalid input number/);
 });
@@ -141,7 +194,7 @@ for (const prompt of ["crash", "hang"]) {
     const run = await startRun(cwd, prompt).catch(() => listRuns(home, true)[0]);
     await until(() => inspectRun(run.dir).state === "failed");
     assert.equal(status(run.dir, "001").state, "interrupted");
-    assert.equal(existsSync(path.join(run.dir, "001.out")), false);
+    assert.equal(existsSync(path.join(run.dir, "001.out.md")), false);
     assert.equal(readFileSync(path.join(run.dir, "prompts.jsonl"), "utf8").trim().split("\n").length, 1);
   });
 }
@@ -163,7 +216,7 @@ test("CLI exits while worker survives; status/list/stop work from another cwd", 
   const result = await exec(process.execPath, [cli, "stop", run.id], { cwd: root });
   assert.equal(JSON.parse(result.stdout).state, "stopped");
   assert.equal(status(run.dir, "001").state, "interrupted");
-  assert.equal(existsSync(path.join(run.dir, "001.out")), false);
+  assert.equal(existsSync(path.join(run.dir, "001.out.md")), false);
 });
 
 test("stop cancels a worker blocked during RPC startup", async (t) => {

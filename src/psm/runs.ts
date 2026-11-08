@@ -71,9 +71,15 @@ export function allocateRunId(home = psmHome()): string {
 }
 
 export function findRun(id: string, home = psmHome()): ReturnType<typeof inspectRun> {
+  const numeric = /^\d+$/.test(id);
+  if (numeric) {
+    if (!/^\d{1,6}$/.test(id) || Number(id) < 1) throw new Error(`Invalid run ID: ${id}`);
+    id = String(Number(id)).padStart(6, "0");
+  }
   const runs = listRuns(home, true);
   const exact = runs.find((run) => run.id === id);
   if (exact) return exact;
+  if (numeric) throw new Error(`Run not found: ${id}`);
   const matches = runs.filter((run) => run.id.startsWith(id));
   if (matches.length !== 1) throw new Error(matches.length ? `Ambiguous run ID: ${id}` : `Run not found: ${id}`);
   return matches[0];

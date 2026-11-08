@@ -7,8 +7,8 @@ PSM 1.0 在现有 garden 归档能力上增加 `psm` CLI。支持 Linux、WSL �
 ```text
 psm CLI → detached worker（每 run 一个）→ pi --mode rpc
                    │                          │
-                   ├─ 顺序读取 NNN.in         ├─ session.jsonl
-                   ├─ NNN.out / status        └─ JSONL events
+                   ├─ 顺序读取 NNN.in.md         ├─ session.jsonl
+                   ├─ NNN.out.md / status        └─ JSONL events
                    └─ archiveSession → session.l1.md / session.l3.md
 ```
 
@@ -18,16 +18,18 @@ CLI 等待 RPC `get_state` 成功、核对精确 provider/model 后返回；不�
 
 | 模块 | 责任 |
 |---|---|
-| `src/psm/cli.ts` | 启动、配置快照、注册 run、list/status/stop |
+| `src/psm/cli.ts` | 启动、配置快照、注册 run、list/status/stop/open/prompt |
 | `src/psm/config.ts` | 全局/本地配置合并、模型别名解析 |
 | `src/psm/worker.ts` | 输入串行消费、状态机、RPC 事件、归档、终止 |
 | `src/psm/rpc.ts` | 子进程、LF framing、请求关联、背压、关闭 |
 | `src/psm/runs.ts` | 六位 ID 原子分配、注册表、存活判定、状态读取 |
-| `src/psm/table.ts` | 终端宽度自适应列表表格 |
+| `src/psm/interaction.ts` | 并发 prompt 编号与原子发布、归档路径选择 |
+| `src/psm/replies.ts` | 输出 frontmatter、按归档 entry 行号刷新详情定位 |
+| `src/psm/table.ts` | 终端宽度自适应列表表格、本地秒级时间 |
 | `src/psm/files.ts` | 私有文件写入、原子替换、JSON I/O |
 | `src/archive.ts` | 显式源文件和输出基名的 L1/L3 归档入口 |
 
-PSM 不使用 garden 的旧目录推导和兄弟 session 重编号，也不自动接入 `/garden` 选择器。输出渲染器原样复用，未改变 garden 内容格式或 `GARDEN_VERSION`。
+PSM 不使用 garden 的旧目录推导和兄弟 session 重编号，也不自动接入 `/garden` 选择器。输出渲染器增加可选 entry 行号回调，Markdown 内容格式未改变，因而不改变 `GARDEN_VERSION`。PSM 每轮记录发送前和完成后的 entry 索引边界，归档后刷新所有成功输出中的 L1 行号，避免重复 prompt 或 frontmatter 行数变化导致定位错误。
 
 ## 隔离
 
@@ -48,7 +50,7 @@ run 状态：`starting → idle ↔ running → stopping → stopped`，异常�
 - prompt response 只表示接受或拒绝，不代表推理完成。
 - `agent_end` 后仍可能重试/压缩；以 `agent_settled` 收尾。
 - 收集 `message_end` 中本轮最后一条 assistant 文本；重试后成功的消息替换之前的错误。
-- 只有 `completed` 生成 `.out`；`failed` 的错误记录在 `.status.json`，`handled` 没有模型答复。
+- 只有 `completed` 生成 `.out.md`；`failed` 的错误记录在 `.status.json`，`handled` 没有模型答复。
 - 输出为空也可能成功，判断依据是状态文件。
 - 归档失败单独写 `run.json.archiveError`，不把已经完成的模型答复标成失败。
 

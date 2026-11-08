@@ -6,16 +6,28 @@
 psm <model-alias> "首条 prompt" [--group research] [--json]
 psm "首条 prompt"                       # config.defaultModel
 psm list [--all] [--group research] [--json]
-psm status <run-id>
-psm stop <run-id>
+psm status 1                           # 1 / 01 / 000001 均指向 000001
+psm stop 1
+psm open 1                             # 系统默认应用打开 L1
+psm open 1 --level l3
+psm prompt 1 "继续分析" [--json]
+psm prompt 1 --file ./prompt.md [--json]
 psm --help
 ```
 
-prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型别名消除歧义。
+prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`open`、`prompt` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型别名消除歧义。
 
-默认 `list` 显示最近 24 小时有活动的 run，加上所有仍存活的 run；`--all` 显示全部注册历史。注册表跨 cwd，位于 `~/.psm/registry/`。已删除 run 目录的记录跳过。status/stop 支持唯一 ID 前缀。status 输出 JSON；stop 最多等待 10 秒，超时返回非零并提示停止请求尚未确认。
+默认 `list` 显示最近 24 小时有活动的 run，加上所有仍存活的 run；`--all` 显示全部注册历史。注册表跨 cwd，位于 `~/.psm/registry/`。已删除 run 目录的记录跳过。所有按 run 操作的命令接受 1～6 位数字简写，补齐六位后精确匹配；0 或超过六位的数字无效，数字不作前缀查询。历史非数字 ID 仍可用唯一前缀。status 输出 JSON；stop 最多等待 10 秒，超时返回非零并提示停止请求尚未确认。
 
 启动命令在 worker 和 Pi 就绪后返回 run ID、目录和首轮结果路径；不会向终端输出模型回答。启动失败返回非零并提供 run 目录。命令成功只表示后台就绪，后续模型错误见轮次状态。
+
+## 打开归档与追加 prompt
+
+`psm open 1` 默认打开 `session.l1.md`，`--level l3` 打开问答归档。复用 garden 的本地系统打开器及 `PI_GARDEN_OPEN_CMD`；WSL 经 `wslpath` 转换后交给 Windows 默认应用，不保证是浏览器。这里只打开已有文件，不触发转换，也不启动 SSH 网页预览服务。首轮未结束或归档失败导致文件缺失时明确报错。停止后的 run 仍可打开归档。
+
+`psm prompt 1 "文本"` 与 `psm prompt 1 --file ./prompt.md` 二选一。文件相对 CLI 当前目录解析，UTF-8 内容原样读取，不执行附件展开。空白 prompt 拒绝；以 `-` 开头的文本使用 `psm prompt 1 -- "-文本"`。命令返回已发布的轮次及输入/输出路径，`--json` 返回结构化结果；这只代表入队，不代表模型完成。
+
+同一 run 的 CLI 提交通过 `prompt.lock/` 串行分配连续编号，临时文件写完后以不覆盖目标的原子硬链接发布，最后移除临时文件。手工文件若抢先占用编号，命令报错而不覆盖；已有编号缺口需先修复。锁等待最多 5 秒；若提交进程强制退出遗留锁，确认该提交进程已退出后可删除 `prompt.lock/` 再试。仅接受存活的 idle/running run；running 时排队，不作 steering，不恢复已停止的 run。与停止并发时，已发布输入也可能留在队列未执行，应检查状态。
 
 ## 配置优先级
 
@@ -75,7 +87,7 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
 
 新 run ID 固定六位，从 `000001` 递增到 `999999`，超过上限报错。同一 `PSM_HOME` 下跨 cwd/group 唯一；`ids/` 中的永久原子占位保证并发不冲突，启动失败或删除 run 后也不复用编号，不应删除占位。旧 UUID run 保持可用；查询先匹配完整 ID，再匹配唯一前缀。
 
-`psm list` 按创建时间倒序输出对齐表格，包含 ID、状态、存活情况、group、模型、最近轮次和更新时间。长字段按终端宽度截断；完整目录见 `psm status`，完整机器输出用 `--json`。
+`psm list` 按创建时间倒序输出对齐表格，包含 ID、状态、存活情况、group、模型、最近轮次和更新时间。更新时间使用 CLI 所在机器的本地时区，显示为 `YYYY-MM-DD HH:mm:ss`（无毫秒）；元数据及 JSON 输出仍用原始 ISO 时间戳。长字段按终端宽度截断；完整目录见 `psm status`，完整机器输出用 `--json`。
 
 ```text
 .psm/runs/<group>/<six-digit-id>/
@@ -85,29 +97,42 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
   session.jsonl             # Pi 原生会话
   session.l1.md             # 完整会话的阅读归档
   session.l3.md             # 完整会话的问答归档
-  001.in                    # 首轮 prompt
-  001.out                   # 成功后的最终文本，可能为空
+  001.in.md                    # 首轮 prompt
+  001.out.md                   # 成功后的最终文本，可能为空
   001.status.json           # 轮次状态与输入 SHA-256
-  002.in                    # 下一轮 prompt
+  002.in.md                    # 下一轮 prompt
   logs/
     events.jsonl            # 原始 RPC 响应和事件
     stderr.log              # Pi/worker 诊断
   stop.json                 # 停止请求，由 psm stop 生成
 ```
 
-用户只应新增下一编号的 `.in`。其他文件由 PSM/Pi 管理。
+用户只应新增下一编号的 `.in.md`，也可用 `psm prompt` 自动分配并发布。其他文件由 PSM/Pi 管理。开发期已直接切换到 `.in.md/.out.md`；不兼容、不迁移旧 `.in/.out`，没有协议版本分支，请新建 run。
 
 ## 输入发布与结果
 
-1. 编号从 `001` 开始，连续到 `999`；遇到缺号等待，非法编号如 `000.in`、`1000.in` 使 run 失败。
-2. 首条 prompt 由 CLI 写入 `001.in`。后续建议写 `002.tmp`，写完后原子重命名为 `002.in`。
+1. 编号从 `001` 开始，连续到 `999`；遇到缺号等待，非法编号如 `000.in.md`、`1000.in.md` 使 run 失败。
+2. 首条 prompt 由 CLI 写入 `001.in.md`。后续建议写 `002.tmp`，写完后原子重命名为 `002.in.md`。
 3. worker 定期扫描，不依赖 `fs.watch`，适用于 WSL drvfs；内容摘要保持不变达到 `stableMs` 后消费。空白输入等待补全。
-4. 直接编辑 `.in` 受稳定窗口保护，但无法保证识别长时间暂停的编辑；需要明确提交边界时使用临时文件 + rename。
+4. 直接编辑 `.in.md` 受稳定窗口保护，但无法保证识别长时间暂停的编辑；需要明确提交边界时使用临时文件 + rename。
 5. 一次只有一轮在执行，后续文件排队；不会把新文件作为 steering 注入当前轮。
-6. 已消费的编号不会重新执行，修改旧 `.in` 不改变已提交输入。状态保存的是发送时文本摘要，session 保存模型实际收到的内容。
-7. `.out` 原子写入后再更新状态为 `completed`；轮次失败/取消/中断不生成 `.out`。L1/L3 在每轮结束及退出时刷新，使用稳定文件名。
+6. 已消费的编号不会重新执行，修改旧 `.in.md` 不改变已提交输入。状态保存的是发送时文本摘要，session 保存模型实际收到的内容。
+7. 成功输出和归档处理完毕后再更新状态为 `completed`；轮次失败/取消/中断不生成 `.out.md`。L1/L3 在每轮结束及退出时刷新，使用稳定文件名。
 
-输入 `.in` 必须是普通文件，不接受符号链接。协议以文本 prompt 为主，不把 `@file` 自动展开为附件；Pi RPC 本身也不接受 CLI `@file` 参数。
+`.out.md` 的 YAML frontmatter 提供本轮详情位置，之后原样保留最终答复（允许空正文）：
+
+```yaml
+---
+round: "001"
+detail_file: session.l1.md
+detail_start_line: 42
+detail_end_line: 186
+---
+```
+
+路径相对输出文件所在目录；行号从 1 开始、首尾包含，可用 `offset=start`、`limit=end-start+1` 读取。范围按本轮实际 session entry 边界生成，包括输入、工具过程和最终答复，不按 prompt 文本猜测。状态文件保存 `entryStart`（含）和 `entryEnd`（不含）的零基 entry 索引，用于归档重生成后刷新所有成功回复的行号。归档失败保留答复，frontmatter 改用 `detail_status: unavailable`，错误见 `run.json.archiveError`。L1 和各输出文件分别原子替换；若读取恰逢下一轮归档刷新，应在该轮结束后重读定位信息。
+
+输入 `.in.md` 必须是普通文件，不接受符号链接。协议以文本 prompt 为主，不把 `@file` 自动展开为附件；Pi RPC 本身也不接受 CLI `@file` 参数。
 
 ## 测试
 

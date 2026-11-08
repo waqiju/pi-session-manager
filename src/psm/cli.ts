@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { closeSync, mkdirSync, openSync, realpathSync, symlinkSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -8,6 +8,8 @@ import { parseArgs } from "node:util";
 import { loadConfig, selectModel } from "./config.ts";
 import { atomicWrite, delay, now, writeJson } from "./files.ts";
 import { formatRuns } from "./table.ts";
+import { openFile } from "../open.ts";
+import { archiveFile, submitPrompt } from "./interaction.ts";
 import { allocateRunId, findRun, inspectRun, listRuns, type Run } from "./runs.ts";
 
 const usage = `psm — file-driven background Pi sessions (Pi >= 1.5; Linux/WSL/macOS)
@@ -15,13 +17,16 @@ const usage = `psm — file-driven background Pi sessions (Pi >= 1.5; Linux/WSL/
   psm <model-alias> <first-prompt> [--group <name>]
   psm <first-prompt>                 Use config.defaultModel
   psm list [--all] [--group <name>] [--json]
-  psm status <run-id>                JSON status; IDs may be unique prefixes
+  psm status <run-id>                JSON status; numeric IDs accept shorthand (1 = 000001)
+  psm open <run-id> [--level l1|l3]   Open archive using the garden system opener
+  psm prompt <run-id> <text>         Submit the next turn (queued while running)
+  psm prompt <run-id> --file <path>   Read a UTF-8 prompt file
   psm stop <run-id>                  Request shutdown and wait up to 10 seconds
 
 Quote each prompt as one argument; use -- before a prompt starting with '-'.
 Configure ~/.psm/config.json and ./.psm/config.json (local overrides global).
-Create 002.in, 003.in, ... in the returned directory for subsequent turns.
-Publish inputs by renaming a temporary file. Completed replies appear as NNN.out.
+Create 002.in.md, 003.in.md, ... in the returned directory for subsequent turns.
+Publish inputs by renaming a temporary file. Completed replies appear as NNN.out.md.
 `;
 
 export async function startRun(cwd: string, prompt: string, alias?: string, group = "default"): Promise<Run> {
@@ -41,7 +46,7 @@ export async function startRun(cwd: string, prompt: string, alias?: string, grou
   const run: Run = { schema: 1, id, token: randomUUID(), dir, cwd, group, model, config: loaded.config,
     state: "starting", createdAt: now(), updatedAt: now() };
   writeJson(path.join(dir, "run.json"), run);
-  atomicWrite(path.join(dir, "001.in"), prompt);
+  atomicWrite(path.join(dir, "001.in.md"), prompt);
   writeJson(path.join(loaded.home, "registry", `${id}.json`), { id, dir });
   const log = openSync(path.join(dir, "logs", "stderr.log"), "a", 0o600);
   try {
@@ -68,10 +73,33 @@ export async function startRun(cwd: string, prompt: string, alias?: string, grou
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
+    file: { type: "string" }, level: { type: "string" },
     help: { type: "boolean", short: "h" }, all: { type: "boolean" }, json: { type: "boolean" }, group: { type: "string" },
   } });
   if (values.help || !positionals.length) { console.log(usage); return; }
   const [command, ...rest] = positionals;
+  if (values.file !== undefined && command !== "prompt") throw new Error("--file is for prompt");
+  if (values.level !== undefined && command !== "open") throw new Error("--level is for open");
+  if (command === "open" || command === "prompt") {
+    if (values.all || values.group || values.json && command === "open") throw new Error(`Unsupported option for ${command}`);
+    if (command === "open") {
+      if (rest.length !== 1) throw new Error("Usage: psm open <run-id> [--level l1|l3]");
+      const run = findRun(rest[0]);
+      const file = archiveFile(run.dir, values.level);
+      const result = await openFile(file);
+      if (!result.ok) throw new Error(result.detail);
+      console.log(`Opened: ${file}`);
+    } else {
+      if (values.file !== undefined ? rest.length !== 1 : rest.length !== 2)
+        throw new Error("Usage: psm prompt <run-id> <text> OR psm prompt <run-id> --file <path>");
+      const run = findRun(rest[0]);
+      const text = values.file !== undefined ? readFileSync(path.resolve(values.file), "utf8") : rest[1];
+      const result = await submitPrompt(run.dir, text);
+      if (values.json) console.log(JSON.stringify(result, null, 2));
+      else console.log(`Run: ${run.id}\nTurn: ${result.number}\nInput: ${result.input}\nReply: ${result.output}`);
+    }
+    return;
+  }
   if (command === "list") {
     if (rest.length) throw new Error("Usage: psm list [--all] [--group name] [--json]");
     const runs = listRuns(undefined, values.all).filter((run) => !values.group || run.group === values.group);
@@ -97,7 +125,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (positionals.length > 2) throw new Error("Quote the prompt as a single argument");
   const run = await startRun(process.cwd(), positionals.at(-1)!, positionals.length === 2 ? command : undefined, values.group);
   if (values.json) console.log(JSON.stringify(run, null, 2));
-  else console.log(`Run: ${run.id}\nState: ${run.state}\nDirectory: ${run.dir}\nReply: ${path.join(run.dir, "001.out")}`);
+  else console.log(`Run: ${run.id}\nState: ${run.state}\nDirectory: ${run.dir}\nReply: ${path.join(run.dir, "001.out.md")}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
