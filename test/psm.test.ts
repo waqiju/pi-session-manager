@@ -4,7 +4,8 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
 import { promisify } from "node:util";
 import { loadConfig, merge, selectModel } from "../src/psm/config.ts";
 import { startRun } from "../src/psm/cli.ts";
@@ -52,8 +53,8 @@ test("prompt CLI queues concurrent UTF-8 inputs and open uses garden's configure
   const promptFile = path.join(root, "multi line.md");
   writeFileSync(promptFile, "中文\nsecond line\n");
   const results = await Promise.all([
-    exec(process.execPath, [cli, "prompt", "1", "--file", promptFile, "--json"], { cwd: root }),
-    exec(process.execPath, [cli, "prompt", "01", "third", "--json"], { cwd: root }),
+    exec(process.execPath, [cli, "1", "--file", promptFile, "--json"], { cwd: root }),
+    exec(process.execPath, [cli, "01", "third", "--json"], { cwd: root }),
   ]);
   const published = results.map((r) => JSON.parse(r.stdout));
   assert.deepEqual(published.map((r) => r.number).sort(), ["002", "003"]);
@@ -68,7 +69,7 @@ test("prompt CLI queues concurrent UTF-8 inputs and open uses garden's configure
     assert.equal((detail.match(/## 🙋 User/g) || []).length, 1);
     assert.match(detail, new RegExp(`reply ${Number(n)}:`));
   }
-  assert.equal(archiveFile(run.dir), path.join(run.dir, "session.l1.md"));
+  assert.equal(archiveFile(run.dir), path.join(run.dir, "session.l3.md"));
   assert.throws(() => archiveFile(run.dir, "l2"), /l1 or l3/);
   const opener = path.join(root, "opener.mjs");
   const opened = path.join(root, "opened.json");
@@ -76,11 +77,26 @@ test("prompt CLI queues concurrent UTF-8 inputs and open uses garden's configure
   const env = { ...process.env, PI_GARDEN_OPEN_CMD: `${process.execPath} ${opener}` };
   await exec(process.execPath, [cli, "open", "1"], { cwd: root, env });
   await until(() => existsSync(opened));
-  assert.deepEqual(readJson(opened), [path.join(run.dir, "session.l1.md")]);
-  rmSync(opened);
-  await exec(process.execPath, [cli, "open", "1", "--level", "l3"], { cwd: root, env });
-  await until(() => existsSync(opened));
   assert.deepEqual(readJson(opened), [path.join(run.dir, "session.l3.md")]);
+  rmSync(opened);
+  await exec(process.execPath, [cli, "open", "1", "--level", "l1"], { cwd: root, env });
+  await until(() => existsSync(opened));
+  assert.deepEqual(readJson(opened), [path.join(run.dir, "session.l1.md")]);
+  for (const id of ["0", "1000000", "999999"]) {
+    await assert.rejects(exec(process.execPath, [cli, id, "never create a run"], { cwd: root }));
+  }
+  assert.equal(listRuns(undefined, true).length, 1);
+  const logs = await exec(process.execPath, [cli, "logs", "1", "--no-follow"], { cwd: root });
+  assert.match(logs.stdout, /reply 3:/);
+  const jsonLogs = await exec(process.execPath, [cli, "logs", "1", "--format", "json", "--no-follow"], { cwd: root });
+  assert.ok(jsonLogs.stdout.trim().split("\n").every((line) => JSON.parse(line).type));
+  const viewer = spawn(process.execPath, [cli, "logs", "1"], { cwd: root, stdio: "pipe" });
+  t.after(() => { if (viewer.exitCode === null) viewer.kill("SIGKILL"); });
+  await once(viewer.stdout, "data");
+  const closed = once(viewer, "close");
+  viewer.kill("SIGINT");
+  assert.deepEqual(await closed, [0, null]);
+  assert.equal(inspectRun(run.dir).alive, true);
   await assert.rejects(exec(process.execPath, [cli, "prompt", "1", "text", "--file", promptFile]), /Usage/);
   await assert.rejects(submitPrompt(run.dir, " \n"), /empty/);
   await exec(process.execPath, [cli, "stop", "1"], { cwd: root });

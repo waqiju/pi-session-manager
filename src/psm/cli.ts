@@ -9,6 +9,7 @@ import { atomicWrite, delay, now, writeJson } from "./files.ts";
 import { formatRuns } from "./table.ts";
 import { openFile } from "../open.ts";
 import { launchWorker, requestStop, restartRun } from "./lifecycle.ts";
+import { followLogs } from "./logs.ts";
 import { archiveFile, submitPrompt } from "./interaction.ts";
 import { allocateRunId, findRun, inspectRun, listRuns, type Run } from "./runs.ts";
 
@@ -18,12 +19,16 @@ const usage = `psm — file-driven background Pi sessions (Pi >= 1.5; Linux/WSL/
   psm <first-prompt>                 Use config.defaultModel
   psm list [--all] [--group <name>] [--json]
   psm status <run-id>                JSON status; numeric IDs accept shorthand (1 = 000001)
-  psm open <run-id> [--level l1|l3]   Open archive using the garden system opener
+  psm open <run-id> [--level l1|l3]   Open archive (default L3) using the garden system opener
+  psm <numeric-id> <text>            Shorthand for psm prompt <id> <text>
+  psm <numeric-id> --file <path>     Submit a UTF-8 prompt file
+  psm logs <run-id> [--format text|json] [--lines 100] [--no-follow]
   psm prompt <run-id> <text>         Submit the next turn (queued while running)
   psm prompt <run-id> --file <path>   Read a UTF-8 prompt file
   psm stop <run-id>                  Request shutdown and wait up to 10 seconds
   psm restart <run-id> [--json]      Restart worker, resume session; never replay interrupted turns
 
+Logs default to text and follow; --lines counts source event lines. Ctrl+C exits only the viewer.
 Quote each prompt as one argument; use -- before a prompt starting with '-'.
 Configure ~/.psm/config.json and ./.psm/config.json (local overrides global).
 Create 002.in.md, 003.in.md, ... in the returned directory for subsequent turns.
@@ -54,13 +59,44 @@ export async function startRun(cwd: string, prompt: string, alias?: string, grou
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
+    format: { type: "string" }, lines: { type: "string" }, "no-follow": { type: "boolean" },
     file: { type: "string" }, level: { type: "string" },
     help: { type: "boolean", short: "h" }, all: { type: "boolean" }, json: { type: "boolean" }, group: { type: "string" },
   } });
   if (values.help || !positionals.length) { console.log(usage); return; }
-  const [command, ...rest] = positionals;
+  let [command, ...rest] = positionals;
+  if (/^\d+$/.test(command) && (rest.length > 0 || values.file !== undefined)) {
+    rest = [command, ...rest];
+    command = "prompt";
+  }
+  if (command !== "logs" && (values.format !== undefined || values.lines !== undefined || values["no-follow"]))
+    throw new Error("--format, --lines and --no-follow are for logs");
   if (values.file !== undefined && command !== "prompt") throw new Error("--file is for prompt");
   if (values.level !== undefined && command !== "open") throw new Error("--level is for open");
+  if (command === "logs") {
+    if (rest.length !== 1 || values.all || values.group || values.json) throw new Error("Usage: psm logs <run-id> [--format text|json] [--lines 100] [--no-follow]");
+    const format = values.format ?? "text";
+    if (format !== "text" && format !== "json") throw new Error("Log format must be text or json");
+    const lines = values.lines ?? "100";
+    if (!/^\d+$/.test(lines) || !Number.isSafeInteger(Number(lines))) throw new Error("--lines must be a non-negative safe integer");
+    const run = findRun(rest[0]);
+    const controller = new AbortController();
+    const stop = () => controller.abort();
+    const stdoutError = (error: NodeJS.ErrnoException) => { if (error.code === "EPIPE") stop(); };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+    process.stdout.on("error", stdoutError);
+    try {
+      await followLogs(run.dir, { format, lines: Number(lines), follow: !values["no-follow"], signal: controller.signal,
+        write: (text) => new Promise<void>((resolve, reject) => process.stdout.write(text, (error) => error ? reject(error) : resolve())),
+        diagnostic: (text) => process.stderr.write(text),
+      });
+    } catch (error: any) { if (error.code !== "EPIPE") throw error; }
+    finally {
+      process.off("SIGINT", stop); process.off("SIGTERM", stop); process.stdout.off("error", stdoutError);
+    }
+    return;
+  }
   if (command === "open" || command === "prompt") {
     if (values.all || values.group || values.json && command === "open") throw new Error(`Unsupported option for ${command}`);
     if (command === "open") {

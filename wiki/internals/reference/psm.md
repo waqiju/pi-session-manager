@@ -9,14 +9,19 @@ psm list [--all] [--group research] [--json]
 psm status 1                           # 1 / 01 / 000001 均指向 000001
 psm stop 1
 psm restart 1 [--json]                 # 恢复原会话，不重放中断轮次
-psm open 1                             # 系统默认应用打开 L1
-psm open 1 --level l3
+psm open 1                             # 系统默认应用打开 L3
+psm open 1 --level l1
+psm 1 "继续分析"                       # psm prompt 的数字 ID 简写
+psm 1 --file ./prompt.md
+psm logs 1                             # 默认 text，尾部 100 行事件后持续跟随
+psm logs 1 --format json --lines 200
+psm logs 1 --no-follow
 psm prompt 1 "继续分析" [--json]
 psm prompt 1 --file ./prompt.md [--json]
 psm --help
 ```
 
-prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`restart`、`open`、`prompt` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型别名消除歧义。
+prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`restart`、`open`、`prompt`、`logs` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型别名消除歧义。
 
 默认 `list` 显示最近 24 小时有活动的 run，加上所有仍存活的 run；`--all` 显示全部注册历史。注册表跨 cwd，位于 `~/.psm/registry/`。已删除 run 目录的记录跳过。所有按 run 操作的命令接受 1～6 位数字简写，补齐六位后精确匹配；0 或超过六位的数字无效，数字不作前缀查询。历史非数字 ID 仍可用唯一前缀。status 输出 JSON；stop 最多等待 10 秒，超时返回非零并提示停止请求尚未确认。
 
@@ -24,11 +29,23 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
 
 ## 打开归档与追加 prompt
 
-`psm open 1` 默认打开 `session.l1.md`，`--level l3` 打开问答归档。复用 garden 的本地系统打开器及 `PI_GARDEN_OPEN_CMD`；WSL 经 `wslpath` 转换后交给 Windows 默认应用，不保证是浏览器。这里只打开已有文件，不触发转换，也不启动 SSH 网页预览服务。首轮未结束或归档失败导致文件缺失时明确报错。停止后的 run 仍可打开归档。
+`psm open 1` 默认打开 `session.l3.md` 问答归档，`--level l1` 打开完整过程。复用 garden 的本地系统打开器及 `PI_GARDEN_OPEN_CMD`；WSL 经 `wslpath` 转换后交给 Windows 默认应用，不保证是浏览器。这里只打开已有文件，不触发转换，也不启动 SSH 网页预览服务。首轮未结束或归档失败导致文件缺失时明确报错。停止后的 run 仍可打开归档。
 
 `psm prompt 1 "文本"` 与 `psm prompt 1 --file ./prompt.md` 二选一。文件相对 CLI 当前目录解析，UTF-8 内容原样读取，不执行附件展开。空白 prompt 拒绝；以 `-` 开头的文本使用 `psm prompt 1 -- "-文本"`。命令返回已发布的轮次及输入/输出路径，`--json` 返回结构化结果；这只代表入队，不代表模型完成。
 
+首参数为纯数字且带第二个位置参数或 `--file` 时，`psm 1 "文本"` / `psm 1 --file ./prompt.md` 等同于显式 `psm prompt`，也支持 `--json`。数字必须为 1～6 位且大于零；无效或不存在的 ID 直接报错，不回退创建 run。该形式下纯数字模型别名让位给 run ID；单独 `psm "123"` 仍使用默认模型创建首条 prompt 为 `123` 的 run。
+
 同一 run 的 CLI 提交通过 `control.lock/` 串行分配连续编号，并与停止请求、restart 和 idle 超时判定互斥。临时文件写完后以不覆盖目标的原子硬链接发布，最后移除临时文件。手工文件若抢先占用编号，命令报错而不覆盖；已有编号缺口需先修复。锁等待最多 5 秒；持锁进程意外退出可能遗留锁，查看 `control.lock/owner.json` 并确认所属进程已退出后才能删除该目录重试，不自动按锁年龄回收。仅接受存活的 idle/running run；running 时排队，不作 steering，不隐式恢复已停止的 run。与手动停止并发时，已发布输入也可能留在队列未执行，应检查状态。
+
+## 终端实时日志
+
+`psm logs <id> [--format text|json] [--lines 100] [--no-follow]` 只读 `logs/events.jsonl`，不连接或接管 Pi。默认 text；不解析 Markdown、不引入终端渲染依赖、不回退光标重绘。模型原文中的 Markdown 标记保留，终端控制字符过滤。
+
+- text 输出 assistant 文本增量、工具开始/完成/失败摘要、重试与压缩状态。工具结果摘要最多 240 个字符，不打印累计工具进度快照；思考内容及原始工具参数可在 JSON 事件中检查。消息快照用于补全中途接入的文本，并避免结束事件重复输出。
+- json 保留原始事件行；stdout 仅 JSONL，查看器诊断写 stderr。无效的完整 JSON 行跳过并提示，尚未写完的末行等待补齐。
+- `--lines` 是非负整数，统一按源事件行计数，默认 100；text 转换后的显示行数可能不同。0 从当前文件末尾开始，只查看后续完整事件。尾部按块倒读，不加载全部历史，但单个大事件仍需完整读入；文本快照可能携带当前消息的较长前文。
+- 默认持续跟随，idle 时等待下一轮；run stopped/failed/interrupted 后读完尾部退出。`--no-follow` 只读取当前快照。Ctrl+C 仅退出查看器，不停止后台任务。
+- 200ms 轮询，支持 UTF-8 分块、文件替换与截断。源文件缺失时，活跃 run 继续等待；`--no-follow` 返回空输出。管道关闭时正常退出。
 
 ## 空闲停止与恢复
 

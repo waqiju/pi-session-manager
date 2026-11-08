@@ -12,7 +12,11 @@ npm link --ignore-scripts --legacy-peer-deps
 psm deepseek "分析当前项目结构"    # 就绪后返回 run ID 和目录，在后台继续执行
 psm list                         # 最近 24 小时有活动的 run + 所有存活 run
 psm status 1                     # 数字 ID 自动补齐为 000001
-psm open 1                       # 使用 garden 的系统打开器查看 L1
+psm open 1                       # 使用 garden 的系统打开器查看 L3
+psm open 1 --level l1             # 完整过程
+psm 1 "继续分析"                  # psm prompt 的数字 ID 简写
+psm logs 1                       # 纯文本实时查看；Ctrl+C 只退出查看器
+psm logs 1 --format json --no-follow # 最近 100 行原始事件
 psm prompt 1 "继续分析"           # 自动追加下一轮，运行中则排队
 psm prompt 1 --file ./prompt.md   # 多行 prompt
 psm stop 1

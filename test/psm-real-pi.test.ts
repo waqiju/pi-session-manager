@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { followLogs } from "../src/psm/logs.ts";
 import { startRun } from "../src/psm/cli.ts";
 import { requestStop, restartRun } from "../src/psm/lifecycle.ts";
 import { submitPrompt } from "../src/psm/interaction.ts";
@@ -53,6 +54,11 @@ test("real Pi RPC with isolated local OpenAI-compatible endpoint", { skip: !proc
       assert.equal(readFileSync(path.join(run.dir, `${n}.out.md`), "utf8").replace(/^---\n[\s\S]*?\n---\n\n/, ""), `local answer ${Number(n)}`);
     }
     assert.equal(requests.length, 2);
+    let transcript = "";
+    await followLogs(run.dir, { format: "text", lines: 1000, follow: false,
+      write: async (text) => { transcript += text; }, diagnostic: () => {} });
+    assert.equal(transcript.split("local answer 1").length - 1, 1);
+    assert.equal(transcript.split("local answer 2").length - 1, 1);
     assert.ok(requests[1].messages.some((m: any) => m.role === "assistant" && JSON.stringify(m.content).includes("local answer 1")));
     assert.match(readFileSync(path.join(run.dir, "session.l3.md"), "utf8"), /local answer 2/);
     assert.equal(inspectRun(run.dir).archiveError, undefined);

@@ -33,7 +33,7 @@ export async function submitPrompt(dir: string, text: string): Promise<{ number:
   });
 }
 
-export function archiveFile(dir: string, level = "l1"): string {
+export function archiveFile(dir: string, level = "l3"): string {
   if (!["l1", "l3"].includes(level)) throw new Error("Archive level must be l1 or l3");
   const file = path.join(dir, `session.${level}.md`);
   if (!existsSync(file)) throw new Error(`Archive not available yet: ${file}; wait for a turn to finish`);

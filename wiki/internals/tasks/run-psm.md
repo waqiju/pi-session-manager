@@ -11,8 +11,8 @@
 
 1. 进入希望模型操作的工作目录。建议将 `.psm/` 加入该项目 `.gitignore`。
 2. 启动：`psm deepseek "分析当前项目结构"`。记录返回的 run ID 和目录。
-3. 等待 `001.status.json` 为 `completed`，打开 `001.out.md`；frontmatter 指出本轮在 L1 中的行范围。执行 `psm open 1` 可用系统默认应用打开完整 L1，`--level l3` 打开问答归档（这里假设 run ID 为 `000001`）。
-4. 执行 `psm prompt 1 "继续分析"`，或 `psm prompt 1 --file ./prompt.md` 提交多行文本。命令自动分配下一轮编号，执行中则排队。也可手工创建 `002.tmp`，写完后重命名为 `002.in.md`，连续编号直到 `999.in.md`。
+3. 等待 `001.status.json` 为 `completed`，打开 `001.out.md`；frontmatter 指出本轮在 L1 中的行范围。执行 `psm open 1` 可用系统默认应用打开 L3 问答归档，`--level l1` 打开完整过程（这里假设 run ID 为 `000001`）。
+4. 执行 `psm 1 "继续分析"`（等同于 `psm prompt 1 "继续分析"`），或 `psm 1 --file ./prompt.md` 提交多行文本。命令自动分配下一轮编号，执行中则排队。也可手工创建 `002.tmp`，写完后重命名为 `002.in.md`，连续编号直到 `999.in.md`。
 5. 执行 `psm list` 或 `psm status <run-id>` 查询状态。
 6. 不再需要后续交互时执行 `psm stop <run-id>`。连续空闲且无排队输入满 24 小时也会自动停止，文件保留；`idleTimeoutMs: 0` 可关闭自动停止。
 7. 需要恢复时执行 `psm restart <run-id>`，再用 `psm prompt <run-id> "检查已有结果，然后继续"` 提交下一轮。restart 恢复原会话，跳过中断轮次；尚未开始的排队输入会自动继续执行，返回信息列出恢复时的队列。
@@ -30,6 +30,7 @@
 
 - 模型别名不存在：检查 `config.json.models`，不要直接依赖全局 pi 的默认模型。
 - 认证失败：检查 PSM 的 `models.json` / `auth.json` 或启动进程继承的 provider 环境变量。
+- 实时查看：`psm logs 1` 默认显示最近 100 行事件转换后的纯文本，并持续跟随；`--format json` 查看原始事件，`--no-follow` 只查看当前尾部。Ctrl+C 退出查看器，后台 run 继续执行。
 - 启动失败：查看返回目录下 `logs/stderr.log`、`run.json.error`，确认 piCommand 和 Pi 版本。
 - 输入无响应：当前仅支持 `.in.md`，不兼容旧 `.in`，开发期旧 run 请重新创建。检查编号是否连续、文件是否为空、run 是否存活；排队输入要等待前一轮结束。
 - 没有 `.out.md`：先看该轮 `.status.json`；failed / aborted / interrupted / handled 都可能没有文本输出。
