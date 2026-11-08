@@ -1,6 +1,61 @@
 # pi-session-manager
 
-简称：garden
+PSM 1.0：通过文件驱动的后台 pi 会话管理器，附带 garden Markdown 归档工具与 pi 扩展。
+
+## PSM 后台会话
+
+要求：Node.js >= 22.19、Pi >= 1.5；支持 Linux / WSL / macOS，暂不支持原生 Windows。
+
+安装入口：[install.md](install.md)。可直接把该文件的 GitHub 链接交给 Agent，完成从 master 安装、配置与全局命令验证。
+
+```bash
+npm install --ignore-scripts --legacy-peer-deps
+npm link --ignore-scripts --legacy-peer-deps
+psm deepseek "分析当前项目结构"    # 就绪后返回 run ID 和目录，在后台继续执行
+psm list                         # 最近 24 小时有活动的 run + 所有存活 run
+psm status 1                     # 数字 ID 自动补齐为 000001
+psm open 1                       # 使用 garden 的系统打开器查看 L3
+psm open 1 --level l1             # 完整过程
+psm 1 "继续分析"                  # psm prompt 的数字 ID 简写
+psm logs 1                       # 纯文本实时查看；Ctrl+C 只退出查看器
+psm logs 1 --format json --no-follow # 最近 100 行原始事件
+psm prompt 1 "继续分析"           # 自动追加下一轮，运行中则排队
+psm prompt 1 --file ./prompt.md   # 多行 prompt
+psm stop 1
+psm restart 1                    # 重新启动 worker，恢复原会话；不重放中断轮次
+```
+
+先在 `~/.psm/config.json` 配置后台默认模型，例如：
+
+```json
+{
+  "defaultModel": "deepseek/deepseek-chat"
+}
+```
+
+模型参数和 `defaultModel` 直接使用 Pi 的模型表达式（精确 ID、模糊名称、`provider/model` 或 `:thinking` 后缀），无需维护别名映射。启动输出和列表显示 Pi 实际选中的模型；restart 固定已解析的模型和 thinking。旧 `config.json.models` 需删除并将默认值改为模型表达式。
+
+模型 endpoint 和认证通过 PSM 自己的 `models.json` / `auth.json` 或 provider 环境变量配置，
+不读取全局 Pi 配置/凭据。当前目录 `.psm/` 的同名配置覆盖全局配置。
+完整配置示例见 [PSM 参考](wiki/internals/reference/psm.md)。
+
+每个 run 存放在 `<cwd>/.psm/runs/<group>/<run-id>/`，默认 group 为 `default`。
+Pi 在调用命令时的 cwd 工作；首轮结果为 `001.out.md`，多轮交互通过依次创建 `002.in.md`、
+`003.in.md` 等文件提交，编号最多到 `999`。推荐先写临时文件再重命名为 `.in.md`。
+每轮串行执行，成功后生成对应 `.out.md`，frontmatter 提供本轮 L1 详情的起止行号，状态见 `.status.json`；自动维护 `session.jsonl`、
+`session.l1.md` 和 `session.l3.md`。连续空闲且无待消费输入满 24 小时后自动停止，文件保留；
+可用 `idleTimeoutMs` 调整时长，设为 `0` 禁用，也可随时执行 `psm stop`。
+
+`psm restart 1` 恢复已停止、失败或中断的 run，沿用原 ID、目录和会话上下文。
+中断轮次跳过，尚未开始的排队输入继续消费；没有排队输入时等待下一条 `psm prompt`。
+恢复不会回滚工具副作用，也不会从工具中断现场续跑。
+
+PSM 默认关闭自动加载的 Pi 插件、skills 和 MCP，保留默认工具与 cwd 的 AGENTS.md 上下文。
+第一期不提供自定义 system prompt 或崩溃自动重放。
+
+[首次使用](wiki/internals/tasks/run-psm.md) · [架构与故障语义](wiki/internals/concepts/psm.md)
+
+## garden 归档
 
 把 pi 的 session 记录（`~/.pi/agent/sessions/**/*.jsonl`，人类阅读困难）转换为
 四级 markdown 归档，输出到与 sessions 同级的 `garden/` 目录。
@@ -8,7 +63,7 @@
 ## 快速开始
 
 ```bash
-# 要求：Node.js >= 22.18（原生 type-stripping，无构建）
+# 要求：Node.js >= 22.19（原生 type-stripping，无构建）
 npm install --ignore-scripts --legacy-peer-deps # 安装网页预览依赖；不另装 pi peer
 node src/cli.ts                    # ~/.pi/agent/sessions → ~/.pi/agent/garden
 node src/cli.ts <sessions目录>     # 输出到其同级 garden/
@@ -101,6 +156,7 @@ index.md 同时是**反向同步**的编辑入口：人工调整缩进（换父�
 ## 开发
 
 ```bash
-npm test                          # node --test
+npm test                          # node --test（真实 Pi 集成测试默认跳过）
+PSM_REAL_PI=/absolute/path/to/pi node --test test/psm-real-pi.test.ts # 真实 Pi + 本地模拟 API，无外部费用
 python3 scripts/check_wiki_links.py   # 改了 wiki / README / AGENTS 后运行
 ```

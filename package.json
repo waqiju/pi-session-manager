@@ -1,21 +1,23 @@
 {
   "name": "pi-session-manager",
-  "version": "0.6.5",
-  "description": "garden: 把 pi 的 session 记录 (.jsonl) 转换为四级可读 markdown (l0/l1/l2/l3)，CLI + pi 扩展双形态",
+  "version": "1.0.0",
+  "description": "PSM: file-driven background Pi sessions, with garden Markdown archives and Pi extension",
   "type": "module",
   "private": true,
   "keywords": [
     "pi-package"
   ],
   "bin": {
-    "garden": "src/cli.ts"
+    "garden": "src/cli.ts",
+    "psm": "src/psm/cli.ts"
   },
   "engines": {
-    "node": ">=22.18"
+    "node": ">=22.19"
   },
   "scripts": {
     "garden": "node src/cli.ts",
-    "test": "node --test test/render.test.ts test/truncate.test.ts test/naming.test.ts test/cli.test.ts test/extension.test.ts test/session-list.test.ts test/session-tree.test.ts test/garden-selector.test.ts test/index-page.test.ts test/textwidth.test.ts test/textwidth-regression.test.ts test/open.test.ts test/preview.test.ts test/reverse-sync.test.ts test/path-merge.test.ts test/garden-shortcut.test.ts"
+    "psm": "node src/psm/cli.ts",
+    "test": "node --test test/render.test.ts test/truncate.test.ts test/naming.test.ts test/cli.test.ts test/extension.test.ts test/session-list.test.ts test/session-tree.test.ts test/garden-selector.test.ts test/index-page.test.ts test/textwidth.test.ts test/textwidth-regression.test.ts test/open.test.ts test/preview.test.ts test/reverse-sync.test.ts test/path-merge.test.ts test/garden-shortcut.test.ts test/psm.test.ts test/psm-feedback.test.ts test/psm-interaction.test.ts test/psm-lifecycle.test.ts test/psm-logs.test.ts test/psm-real-pi.test.ts"
   },
   "pi": {
     "extensions": [

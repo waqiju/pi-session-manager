@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -29,6 +29,15 @@ function sessionJsonl(id: string, timestamp: string, name?: string): string {
   lines.push({ type: "message", id: `${id}-m`, parentId: null, timestamp, message: { role: "user", content: "hi", timestamp: 1 } });
   return lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
 }
+
+test("CLI: global symlink entry runs from another directory", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "garden-link-"));
+  try {
+    const link = path.join(root, "garden");
+    symlinkSync(CLI, link);
+    assert.match(execFileSync(process.execPath, [link, "--help"], { cwd: root, encoding: "utf8" }), /garden.*sessions/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test("CLI: 目录模式默认只导出 l1/l3，增量跳过", () => {
   const { root, sessionsDir } = setup();

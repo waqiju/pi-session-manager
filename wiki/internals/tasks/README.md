@@ -5,6 +5,7 @@
 
 | 任务 | 场景 |
 |------|------|
+| [run-psm](wiki/internals/tasks/run-psm.md) | 启动后台会话、文件追加 prompt、查看结果与停止 |
 | [run-conversion](run-conversion.md) | 日常转换 / 增量更新 / 全量重生成 |
 | [tune-budget](tune-budget.md) | 调整截断预算或截断行为 |
 | [add-entry-type](add-entry-type.md) | pi 新增 entry / message 类型后的跟进 |

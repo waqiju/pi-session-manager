@@ -31,6 +31,7 @@ import {
 
 export interface FullRenderOptions extends RenderOptions {
   level: "l0" | "l1";
+  onEntry?: (entry: Entry, index: number, startLine: number, endLine: number) => void;
 }
 
 /**
@@ -45,11 +46,14 @@ export function renderFull(
   const truncate = opts.level === "l1";
   const out: string[] = [frontmatter(header, entries, opts.level, opts.sourceName)];
   let prev: Entry | null = null;
-  for (const entry of entries) {
+  let nextLine = out[0].split("\n").length + 2;
+  for (const [index, entry] of entries.entries()) {
+    const startLine = nextLine;
     const note = branchNote(prev, entry);
-    if (note) out.push(note);
+    if (note) { out.push(note); nextLine += note.split("\n").length + 1; }
     const block = renderEntry(entry, truncate);
-    if (block) out.push(block);
+    if (block) { out.push(block); nextLine += block.split("\n").length + 1; }
+    if (nextLine > startLine) opts.onEntry?.(entry, index, startLine, nextLine - 2);
     prev = entry;
   }
   return out.join("\n\n") + "\n";

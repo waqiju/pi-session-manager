@@ -4,6 +4,7 @@
 
 | 页面 | 内容 |
 |------|------|
+| [psm](wiki/internals/reference/psm.md) | PSM CLI、配置覆盖、run 目录与文件协议 |
 | [cli](cli.md) | garden CLI：参数、默认值、退出码、增量语义 |
 | [extension](extension.md) | pi 扩展：安装、触发点、`/garden` 命令、`PI_GARDEN*` 配置 |
 | [api](api.md) | `src/` 导出函数字典 |
