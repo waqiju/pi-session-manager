@@ -64,6 +64,12 @@ export async function startRun(cwd: string, prompt: string, modelExpression?: st
     state: "starting", createdAt: now(), startedAt: now(), updatedAt: now(), restartCount: 0 };
   writeJson(path.join(dir, "run.json"), run);
   atomicWrite(path.join(dir, "001.in.md"), prompt);
+  // Initialize before publishing the run or spawning its sole archive writer.
+  // Pi owns session.jsonl; this waiting document is not a synthetic session.
+  const initialArchive = `# PSM run ${id}\n\n> Waiting for the first turn result. PSM replaces this document when the turn ends.\n> Check \`psm status ${id}\` for run status.\n\n## First prompt\n\n${prompt}\n`;
+  for (const level of ["l1", "l3"]) {
+    atomicWrite(path.join(dir, `session.${level}.md`), initialArchive);
+  }
   writeJson(path.join(loaded.home, "registry", `${id}.json`), { id, dir });
   return launchWorker(run);
 }

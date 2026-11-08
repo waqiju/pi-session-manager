@@ -104,9 +104,40 @@ test("prompt CLI queues concurrent UTF-8 inputs and open uses garden's configure
   await assert.rejects(submitPrompt(run.dir, "late"), /Cannot submit/);
 });
 
+test("start prepares both archives before the first turn; concurrent open is read-only", async (t) => {
+  const { cwd, root } = setup(t, { stableMs: 2000 });
+  const prompt = "first 中文\n\n```ts\nconst waiting = true;\n```";
+  const run = await startRun(cwd, prompt);
+  assert.equal(existsSync(path.join(run.dir, "001.status.json")), false);
+  const initial = ["l1", "l3"].map((level) => {
+    const text = readFileSync(archiveFile(run.dir, level), "utf8");
+    assert.match(text, /Waiting for the first turn result/);
+    assert.ok(text.includes(prompt));
+    return text;
+  });
+  const cli = fileURLToPath(new URL("../src/psm/cli.ts", import.meta.url));
+  const exec = promisify(execFile);
+  const opener = path.join(root, "early-opener.mjs");
+  writeFileSync(opener, "import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[2] + '.opened', 'yes');");
+  const env = { ...process.env, PI_GARDEN_OPEN_CMD: `${process.execPath} ${opener}` };
+  await Promise.all(["l1", "l3", "l3"].map((level) =>
+    exec(process.execPath, [cli, "open", run.id, "--level", level], { cwd, env })));
+  for (const [index, level] of ["l1", "l3"].entries()) {
+    await until(() => existsSync(path.join(run.dir, `session.${level}.md.opened`)));
+    assert.equal(readFileSync(archiveFile(run.dir, level), "utf8"), initial[index]);
+  }
+  await until(() => status(run.dir, "001").state === "completed");
+  for (const level of ["l1", "l3"]) {
+    const text = readFileSync(archiveFile(run.dir, level), "utf8");
+    assert.match(text, /reply 1: first 中文/);
+    assert.doesNotMatch(text, /Waiting for the first turn result/);
+  }
+});
+
 test("archive failure preserves successful reply with unavailable detail marker", async (t) => {
   const { cwd } = setup(t, { stableMs: 300 });
   const run = await startRun(cwd, "first");
+  rmSync(path.join(run.dir, "session.l1.md"));
   mkdirSync(path.join(run.dir, "session.l1.md"));
   await until(() => status(run.dir, "001").state === "completed");
   assert.ok(inspectRun(run.dir).archiveError);

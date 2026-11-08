@@ -37,7 +37,7 @@ restart 不再执行 JS，资源摘要不匹配时拒绝恢复；两种模式不
 
 ## 打开归档与追加 prompt
 
-`psm open 1` 默认打开 `session.l3.md` 问答归档，`--level l1` 打开完整过程。复用 garden 的本地系统打开器及 `PI_GARDEN_OPEN_CMD`；WSL 经 `wslpath` 转换后交给 Windows 默认应用，不保证是浏览器。这里只打开已有文件，不触发转换，也不启动 SSH 网页预览服务。首轮未结束或归档失败导致文件缺失时明确报错。停止后的 run 仍可打开归档。
+`psm open 1` 默认打开 `session.l3.md` 问答归档，`--level l1` 打开完整过程。复用 garden 的本地系统打开器及 `PI_GARDEN_OPEN_CMD`；WSL 经 `wslpath` 转换后交给 Windows 默认应用，不保证是浏览器。启动命令在启动 worker 前创建两份初始 Markdown，包含首条 prompt 和等待结果提示，因此启动成功后可以立即打开。worker 在本轮结束时用实际会话归档替换初始文档；查看器是否自动显示更新取决于其文件重载能力。初始提示不代表实时状态，启动或归档失败时应查看 `psm status`。`open` 只打开已有文件，不触发转换，也不启动 SSH 网页预览服务；历史 run 或文件被删除等导致文件缺失时仍明确报错。停止后的 run 仍可打开归档。
 
 `psm prompt 1 "文本"` 与 `psm prompt 1 --file ./prompt.md` 二选一。文件相对 CLI 当前目录解析，UTF-8 内容原样读取，不执行附件展开。空白 prompt 拒绝；以 `-` 开头的文本使用 `psm prompt 1 -- "-文本"`。命令返回已发布的轮次及输入/输出路径，`--json` 返回结构化结果；这只代表入队，不代表模型完成。
 

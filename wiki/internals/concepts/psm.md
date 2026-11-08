@@ -33,6 +33,8 @@ CLI 等待 RPC `get_state` 成功并保存实际 provider/model/thinking 后返�
 | `src/psm/files.ts` | 私有文件写入、原子替换、JSON I/O |
 | `src/archive.ts` | 显式源文件和输出基名的 L1/L3 归档入口 |
 
+CLI 在注册 run 和启动 worker 前初始化 `session.l1.md` / `session.l3.md`，展示首条 prompt 与等待结果提示，不创建或修改 Pi 的 `session.jsonl`。启动后归档仅由 worker 写入；`open` 保持只读，避免 CLI 的旧快照覆盖 worker 新归档。初始文档不使用 garden 渲染器或增量版本标记，不影响 `GARDEN_VERSION`。
+
 PSM 不使用 garden 的旧目录推导和兄弟 session 重编号，也不自动接入 `/garden` 选择器。输出渲染器增加可选 entry 行号回调，Markdown 内容格式未改变，因而不改变 `GARDEN_VERSION`。PSM 每轮记录发送前和完成后的 entry 索引边界，归档后刷新所有成功输出中的 L1 行号，避免重复 prompt 或 frontmatter 行数变化导致定位错误。
 
 ## 隔离
