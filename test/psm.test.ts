@@ -43,14 +43,21 @@ function setup(t: any, extra = {}) {
 }
 const status = (dir: string, n: string) => readJson(path.join(dir, `${n}.status.json`), {});
 
-test("configuration merges fields/models by ID, isolates credentials, rejects invalid settings", (t) => {
+test("configuration merges ordinary fields and selects a whole models file", (t) => {
   const { home, cwd } = setup(t);
   writeJson(path.join(home, "models.json"), { providers: { demo: { baseUrl: "https://example.invalid", models: [{ id: "a", maxTokens: 100 }, { id: "b" }] } } });
   writeJson(path.join(cwd, ".psm/models.json"), { providers: { demo: { models: [{ id: "a", maxTokens: 200 }] } } });
   writeJson(path.join(cwd, ".psm/config.json"), { models: { fake: { thinking: "high" } } });
   const loaded = loadConfig(cwd);
-  assert.equal(loaded.models.providers.demo.models.length, 2);
-  assert.equal(loaded.models.providers.demo.models[0].maxTokens, 200);
+  assert.equal(loaded.modelsFile, path.join(cwd, ".psm/models.json"));
+  assert.equal(readJson(loaded.modelsFile!).providers.demo.models.length, 1);
+  rmSync(loaded.modelsFile!);
+  assert.equal(loadConfig(cwd).modelsFile, path.join(home, "models.json"));
+  writeFileSync(path.join(cwd, ".psm/models.json"), '{"apiKey":"secret-value", BROKEN');
+  assert.throws(() => loadConfig(cwd), (error: Error) => /Invalid models.json/.test(error.message) && !error.message.includes("secret-value"));
+  rmSync(path.join(cwd, ".psm/models.json"));
+  rmSync(path.join(home, "models.json"));
+  assert.equal(loadConfig(cwd).modelsFile, undefined);
   assert.deepEqual(selectModel(loaded.config), { provider: "fixture", model: "test", thinking: "high" });
   assert.deepEqual(loaded.auth, {});
   assert.throws(() => selectModel(loaded.config, "unknown"), /Unknown/);
@@ -62,6 +69,9 @@ test("configuration merges fields/models by ID, isolates credentials, rejects in
 test("detached RPC: serial files, no early agent_end completion, UTF-8, archives, list and stop", async (t) => {
   const { cwd, home } = setup(t);
   const run = await startRun(cwd, "first 中文\u2028line", undefined, "research");
+  assert.equal(run.id, "000001");
+  assert.ok(existsSync(path.join(run.dir, "logs/stderr.log")));
+  assert.equal(existsSync(path.join(run.dir, "stderr.log")), false);
   assert.ok(alive(run));
   const observed = readJson(path.join(run.dir, "observed.json"));
   assert.equal(observed.cwd, cwd);
@@ -75,6 +85,7 @@ test("detached RPC: serial files, no early agent_end completion, UTF-8, archives
   assert.equal(readFileSync(path.join(run.dir, "001.out"), "utf8"), "reply 1: first 中文\u2028line");
   assert.equal(readFileSync(path.join(run.dir, "002.out"), "utf8"), "reply 2: second");
   for (const level of ["l1", "l3"]) assert.match(readFileSync(path.join(run.dir, `session.${level}.md`), "utf8"), /second/);
+  assert.ok(existsSync(path.join(run.dir, "logs/events.jsonl")));
   assert.equal(inspectRun(run.dir).archiveError, undefined);
   assert.equal(listRuns(home)[0].id, run.id);
   assert.equal(findRun(run.id.slice(0, 8), home).id, run.id);

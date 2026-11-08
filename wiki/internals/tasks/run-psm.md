@@ -27,7 +27,7 @@
 
 - 模型别名不存在：检查 `config.json.models`，不要直接依赖全局 pi 的默认模型。
 - 认证失败：检查 PSM 的 `models.json` / `auth.json` 或启动进程继承的 provider 环境变量。
-- 启动失败：查看返回目录下 `stderr.log`、`run.json.error`，确认 piCommand 和 Pi 版本。
+- 启动失败：查看返回目录下 `logs/stderr.log`、`run.json.error`，确认 piCommand 和 Pi 版本。
 - 输入无响应：检查编号是否连续、文件是否为空、run 是否存活；排队输入要等待前一轮结束。
 - 没有 `.out`：先看该轮 `.status.json`；failed / aborted / interrupted / handled 都可能没有文本输出。
 - 归档缺失：查看 `run.json.archiveError`。模型答复成功与归档成功分别记录。

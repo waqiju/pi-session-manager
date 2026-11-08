@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { closeSync, mkdirSync, openSync, realpathSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, realpathSync, symlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -7,7 +7,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { loadConfig, selectModel } from "./config.ts";
 import { atomicWrite, delay, now, writeJson } from "./files.ts";
-import { findRun, inspectRun, listRuns, type Run } from "./runs.ts";
+import { formatRuns } from "./table.ts";
+import { allocateRunId, findRun, inspectRun, listRuns, type Run } from "./runs.ts";
 
 const usage = `psm — file-driven background Pi sessions (Pi >= 1.5; Linux/WSL/macOS)
 
@@ -29,11 +30,12 @@ export async function startRun(cwd: string, prompt: string, alias?: string, grou
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(group)) throw new Error("Group must use 1–64 letters, numbers, '_' or '-'");
   const loaded = loadConfig(cwd);
   const model = selectModel(loaded.config, alias);
-  const id = randomUUID();
+  const id = allocateRunId(loaded.home);
   const dir = path.join(loaded.local, "runs", group, id);
   const agent = path.join(dir, "agent");
   mkdirSync(agent, { recursive: true, mode: 0o700 });
-  writeJson(path.join(agent, "models.json"), loaded.models);
+  if (loaded.modelsFile) symlinkSync(loaded.modelsFile, path.join(agent, "models.json"));
+  mkdirSync(path.join(dir, "logs"), { mode: 0o700 });
   writeJson(path.join(agent, "auth.json"), loaded.auth);
   writeJson(path.join(agent, "settings.json"), { packages: [], quietStartup: true });
   const run: Run = { schema: 1, id, token: randomUUID(), dir, cwd, group, model, config: loaded.config,
@@ -41,7 +43,7 @@ export async function startRun(cwd: string, prompt: string, alias?: string, grou
   writeJson(path.join(dir, "run.json"), run);
   atomicWrite(path.join(dir, "001.in"), prompt);
   writeJson(path.join(loaded.home, "registry", `${id}.json`), { id, dir });
-  const log = openSync(path.join(dir, "stderr.log"), "a", 0o600);
+  const log = openSync(path.join(dir, "logs", "stderr.log"), "a", 0o600);
   try {
     const child = spawn(process.execPath, [fileURLToPath(new URL("./worker.ts", import.meta.url)), dir], {
       cwd, detached: true, stdio: ["ignore", log, log], env: process.env,
@@ -61,7 +63,7 @@ export async function startRun(cwd: string, prompt: string, alias?: string, grou
     await delay(100);
   }
   writeJson(path.join(dir, "stop.json"), { token: run.token, requestedAt: now() });
-  throw new Error(`Startup timed out; shutdown requested. Inspect ${dir}/stderr.log`);
+  throw new Error(`Startup timed out; shutdown requested. Inspect ${dir}/logs/stderr.log`);
 }
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
@@ -74,10 +76,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     if (rest.length) throw new Error("Usage: psm list [--all] [--group name] [--json]");
     const runs = listRuns(undefined, values.all).filter((run) => !values.group || run.group === values.group);
     if (values.json) console.log(JSON.stringify(runs, null, 2));
-    else {
-      console.log("ID\tSTATE\tALIVE\tGROUP\tMODEL\tUPDATED\tDIRECTORY");
-      for (const run of runs) console.log(`${run.id}\t${run.state}\t${run.alive}\t${run.group}\t${run.model.provider}/${run.model.model}\t${run.updatedAt}\t${run.dir}`);
-    }
+    else console.log(formatRuns(runs, process.stdout.columns || 120));
     return;
   }
   if (values.all || values.group && ["status", "stop"].includes(command)) throw new Error("--all is for list; --group is for start/list");

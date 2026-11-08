@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { psmHome } from "./config.ts";
 import type { Config, ModelChoice } from "./config.ts";
@@ -54,8 +54,27 @@ export function listRuns(home = psmHome(), all = false): ReturnType<typeof inspe
   return runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+/** Permanent atomic reservations survive failed starts and deleted run directories. */
+export function allocateRunId(home = psmHome()): string {
+  const reservations = path.join(home, "ids");
+  mkdirSync(reservations, { recursive: true, mode: 0o700 });
+  const registry = path.join(home, "registry");
+  const names = [...readdirSync(reservations), ...(existsSync(registry) ? readdirSync(registry).map((n) => n.replace(/\.json$/, "")) : [])];
+  let highest = 0;
+  for (const name of names) if (/^\d{6}$/.test(name)) highest = Math.max(highest, Number(name));
+  for (let number = highest + 1; number <= 999999; number++) {
+    const id = String(number).padStart(6, "0");
+    try { mkdirSync(path.join(reservations, id), { mode: 0o700 }); return id; }
+    catch (error: any) { if (error.code !== "EEXIST") throw error; }
+  }
+  throw new Error("Run ID limit reached (999999)");
+}
+
 export function findRun(id: string, home = psmHome()): ReturnType<typeof inspectRun> {
-  const matches = listRuns(home, true).filter((run) => run.id === id || run.id.startsWith(id));
+  const runs = listRuns(home, true);
+  const exact = runs.find((run) => run.id === id);
+  if (exact) return exact;
+  const matches = runs.filter((run) => run.id.startsWith(id));
   if (matches.length !== 1) throw new Error(matches.length ? `Ambiguous run ID: ${id}` : `Run not found: ${id}`);
   return matches[0];
 }

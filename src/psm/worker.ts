@@ -29,7 +29,7 @@ export async function work(dir: string): Promise<void> {
   const seen = new Map<string, { hash: string; since: number }>();
   const persist = () => { run.heartbeatAt = now(); writeJson(runPath, run); };
   const transition = (state: Run["state"]) => { run.state = state; run.updatedAt = now(); persist(); };
-  const log = (text: string) => appendFileSync(path.join(dir, "stderr.log"), text, { mode: 0o600 });
+  const log = (text: string) => appendFileSync(path.join(dir, "logs", "stderr.log"), text, { mode: 0o600 });
   const archive = () => {
     if (!existsSync(path.join(dir, "session.jsonl"))) return;
     try { archiveSession(path.join(dir, "session.jsonl"), path.join(dir, "session")); delete run.archiveError; }
@@ -49,7 +49,7 @@ export async function work(dir: string): Promise<void> {
     if (!stopping) transition("idle");
   };
   const event = (record: RecordValue) => {
-    appendFileSync(path.join(dir, "events.jsonl"), JSON.stringify(record) + "\n", { mode: 0o600 });
+    appendFileSync(path.join(dir, "logs", "events.jsonl"), JSON.stringify(record) + "\n", { mode: 0o600 });
     if (record.type === "extension_ui_request" && ["select", "confirm", "input", "editor"].includes(record.method)) {
       void rpc?.send({ type: "extension_ui_response", id: record.id, cancelled: true }).catch((e) => { fatal = e.message; });
     }

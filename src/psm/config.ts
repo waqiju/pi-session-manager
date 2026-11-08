@@ -1,3 +1,4 @@
+import { lstatSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { readJson } from "./files.ts";
@@ -20,20 +21,13 @@ function object(value: any): value is ObjectMap {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Object fields merge; model arrays merge by exact ID. Other arrays replace. */
+/** Object fields merge; arrays replace. */
 export function merge(base: any, override: any): any {
   if (!object(base) || !object(override)) return override;
   const result = Object.fromEntries(Object.entries(base));
   for (const [key, value] of Object.entries(override)) {
     if (["__proto__", "constructor", "prototype"].includes(key)) throw new Error(`Invalid configuration key: ${key}`);
-    if (key === "models" && Array.isArray(value) && Array.isArray(base[key])) {
-      const models = new Map(base[key].map((m: any) => [m.id, m]));
-      for (const model of value) {
-        if (!object(model) || typeof model.id !== "string") throw new Error("models entries require an id");
-        models.set(model.id, merge(models.get(model.id), model));
-      }
-      result[key] = [...models.values()];
-    } else result[key] = object(value) ? merge(object(base[key]) ? base[key] : {}, value) : value;
+    result[key] = object(value) ? merge(object(base[key]) ? base[key] : {}, value) : value;
   }
   return result;
 }
@@ -58,7 +52,18 @@ export function loadConfig(cwd: string, home = psmHome()) {
   for (const key of ["pollMs", "stableMs", "startupTimeoutMs", "turnTimeoutMs"] as const) {
     if (!Number.isSafeInteger(config[key]) || config[key] < 10) throw new Error(`${key} must be an integer >= 10`);
   }
-  return { config, models: load("models.json"), auth: load("auth.json"), home, local };
+  let modelsFile: string | undefined;
+  for (const directory of [...new Set([local, home])]) {
+    const candidate = path.resolve(directory, "models.json");
+    if (!lstatSync(candidate, { throwIfNoEntry: false })) continue;
+    // Do not expose JSON parser excerpts: the file can contain literal API keys.
+    try {
+      if (!object(readJson(candidate))) throw new Error("Expected object");
+    } catch { throw new Error(`Invalid models.json: ${candidate}; expected a readable JSON object`); }
+    modelsFile = candidate;
+    break;
+  }
+  return { config, modelsFile, auth: load("auth.json"), home, local };
 }
 
 export function selectModel(config: Config, name = config.defaultModel): ModelChoice {

@@ -27,7 +27,7 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
 - `models.json`：Pi 原生模型/provider 配置。
 - `auth.json`：Pi 原生认证配置；可选，也可使用 provider 环境变量。
 
-对象字段递归合并；`models.json` 的 provider 下 `models` 数组按模型 ID 合并。同名模型字段本地覆盖全局，其他数组整体替换。缺失字段保留全局值；不支持删除标记。
+`config.json` 和 `auth.json` 对象字段递归合并，本地覆盖全局，数组整体替换。`models.json` 不合并、不复制：优先整文件使用当前目录版本，否则使用全局版本；本地文件无效时直接报错，不回退。两处都不存在时使用 Pi 内置模型及现有认证。run 的 `agent/models.json` 是指向选定源文件的绝对符号链接，不保存含 API key 的副本或快照。修改源文件会影响后续加载，既有进程是否重新加载取决于 Pi。历史 run 的副本不自动迁移。
 
 `config.json` 示例：
 
@@ -73,11 +73,15 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
 
 ## Run 目录
 
+新 run ID 固定六位，从 `000001` 递增到 `999999`，超过上限报错。同一 `PSM_HOME` 下跨 cwd/group 唯一；`ids/` 中的永久原子占位保证并发不冲突，启动失败或删除 run 后也不复用编号，不应删除占位。旧 UUID run 保持可用；查询先匹配完整 ID，再匹配唯一前缀。
+
+`psm list` 按创建时间倒序输出对齐表格，包含 ID、状态、存活情况、group、模型、最近轮次和更新时间。长字段按终端宽度截断；完整目录见 `psm status`，完整机器输出用 `--json`。
+
 ```text
-.psm/runs/<group>/<uuid>/
+.psm/runs/<group>/<six-digit-id>/
   run.json                  # 运行状态、cwd、有效 PSM 配置、PID、心跳
   worker.lock               # 永久独占声明；不支持同 run 重启
-  agent/                    # 独立 Pi 配置与认证快照
+  agent/                    # 独立配置；models.json 为源文件的符号链接
   session.jsonl             # Pi 原生会话
   session.l1.md             # 完整会话的阅读归档
   session.l3.md             # 完整会话的问答归档
@@ -85,8 +89,9 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
   001.out                   # 成功后的最终文本，可能为空
   001.status.json           # 轮次状态与输入 SHA-256
   002.in                    # 下一轮 prompt
-  events.jsonl              # 原始 RPC 响应和事件
-  stderr.log                # Pi/worker 诊断
+  logs/
+    events.jsonl            # 原始 RPC 响应和事件
+    stderr.log              # Pi/worker 诊断
   stop.json                 # 停止请求，由 psm stop 生成
 ```
 

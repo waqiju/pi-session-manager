@@ -12,7 +12,7 @@ psm CLI → detached worker（每 run 一个）→ pi --mode rpc
                    └─ archiveSession → session.l1.md / session.l3.md
 ```
 
-CLI 等待 RPC `get_state` 成功、核对精确 provider/model 后返回；不等待首轮回答。worker 脱离启动终端，每个 run 独立，不需要全局 daemon。Pi 在调用 `psm` 时的 cwd 工作，数据存储在该 cwd 的 `.psm/runs/<group>/<uuid>/`。group 默认 `default`。
+CLI 等待 RPC `get_state` 成功、核对精确 provider/model 后返回；不等待首轮回答。worker 脱离启动终端，每个 run 独立，不需要全局 daemon。Pi 在调用 `psm` 时的 cwd 工作，数据存储在该 cwd 的 `.psm/runs/<group>/<six-digit-id>/`。group 默认 `default`。
 
 新增模块：
 
@@ -22,7 +22,8 @@ CLI 等待 RPC `get_state` 成功、核对精确 provider/model 后返回；不�
 | `src/psm/config.ts` | 全局/本地配置合并、模型别名解析 |
 | `src/psm/worker.ts` | 输入串行消费、状态机、RPC 事件、归档、终止 |
 | `src/psm/rpc.ts` | 子进程、LF framing、请求关联、背压、关闭 |
-| `src/psm/runs.ts` | 注册表、存活判定、状态读取 |
+| `src/psm/runs.ts` | 六位 ID 原子分配、注册表、存活判定、状态读取 |
+| `src/psm/table.ts` | 终端宽度自适应列表表格 |
 | `src/psm/files.ts` | 私有文件写入、原子替换、JSON I/O |
 | `src/archive.ts` | 显式源文件和输出基名的 L1/L3 归档入口 |
 
@@ -30,9 +31,9 @@ PSM 不使用 garden 的旧目录推导和兄弟 session 重编号，也不自�
 
 ## 隔离
 
-每个 run 的 `agent/` 保存合并后的 `models.json`、`auth.json` 和独立 `settings.json`，通过 `PI_CODING_AGENT_DIR` 传给 Pi；session 路径也显式指定。父会话的 `PI_SESSION_*`、模型标记被移除。
+每个 run 的 `agent/` 保存合并后的 `auth.json` 和独立 `settings.json`；`models.json` 使用符号链接指向当前目录或全局源文件（本地优先，整文件选择，不合并或复制），通过 `PI_CODING_AGENT_DIR` 传给 Pi；session 路径也显式指定。父会话的 `PI_SESSION_*`、模型标记被移除。
 
-凭据只从 PSM 的 `auth.json`、`models.json` 或继承的 provider 环境变量解析；不读取或复制 `~/.pi/agent` 的凭据。Pi 的内置模型目录仍可使用，但 PSM 必须显式配置模型别名。运行配置与认证快照只对新 run 生效，既有 run 不热加载。
+凭据只从 PSM 的 `auth.json`、`models.json` 或继承的 provider 环境变量解析；不读取或复制 `~/.pi/agent` 的凭据。Pi 的内置模型目录仍可使用，但 PSM 必须显式配置模型别名。运行配置与认证快照只对新 run 生效。模型文件不保留快照，源文件修改会影响后续加载；已有 Pi 进程的重载时机由 Pi 决定。
 
 第一期关闭自动发现的 extensions、skills、prompt templates、themes 和 MCP，并忽略项目 `.pi` 的信任门控资源，防止全局插件隐式加入后台执行。Pi 的默认工具与调用 cwd 的 `AGENTS.md` 上下文仍生效。PSM 没有自定义 system prompt 配置。`--offline` 禁止 Pi 的自动模型目录更新等联网活动，不禁止模型 API 请求。
 
@@ -51,7 +52,7 @@ run 状态：`starting → idle ↔ running → stopping → stopped`，异常�
 - 输出为空也可能成功，判断依据是状态文件。
 - 归档失败单独写 `run.json.archiveError`，不把已经完成的模型答复标成失败。
 
-worker 每秒更新心跳。存活判定同时检查活动状态、PID 存在、心跳新鲜度（至少 10 秒宽限）；它不是操作系统进程清单，无法列出非 PSM 启动的 Pi。全局注册表只保存 run ID 和路径，供跨 cwd 查询。
+worker 每秒更新心跳。存活判定同时检查活动状态、PID 存在、心跳新鲜度（至少 10 秒宽限）；它不是操作系统进程清单，无法列出非 PSM 启动的 Pi。完整事件与诊断写入 run 的 `logs/`。全局 `ids/` 的永久占位避免并发分配冲突及编号复用，旧 UUID 注册记录保持兼容。全局注册表只保存 run ID 和路径，供跨 cwd 查询。
 
 ## 故障与停止
 
