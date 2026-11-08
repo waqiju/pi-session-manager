@@ -15,7 +15,7 @@ import { allocateRunId, findRun, inspectRun, listRuns, type Run } from "./runs.t
 
 const usage = `psm — file-driven background Pi sessions (Pi >= 1.5; Linux/WSL/macOS)
 
-  psm <model-alias> <first-prompt> [--group <name>]
+  psm <model-expression> <first-prompt> [--group <name>]
   psm <first-prompt>                 Use config.defaultModel
   psm list [--all] [--group <name>] [--json]
   psm status <run-id>                JSON status; numeric IDs accept shorthand (1 = 000001)
@@ -35,12 +35,12 @@ Create 002.in.md, 003.in.md, ... in the returned directory for subsequent turns.
 Publish inputs by renaming a temporary file. Completed replies appear as NNN.out.md.
 `;
 
-export async function startRun(cwd: string, prompt: string, alias?: string, group = "default"): Promise<Run> {
+export async function startRun(cwd: string, prompt: string, modelExpression?: string, group = "default"): Promise<Run> {
   if (process.platform === "win32") throw new Error("Native Windows is not supported yet; use WSL");
   if (!prompt.trim()) throw new Error("First prompt must not be empty");
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(group)) throw new Error("Group must use 1–64 letters, numbers, '_' or '-'");
   const loaded = loadConfig(cwd);
-  const model = selectModel(loaded.config, alias);
+  const requestedModel = selectModel(loaded.config, modelExpression);
   const id = allocateRunId(loaded.home);
   const dir = path.join(loaded.local, "runs", group, id);
   const agent = path.join(dir, "agent");
@@ -49,7 +49,7 @@ export async function startRun(cwd: string, prompt: string, alias?: string, grou
   mkdirSync(path.join(dir, "logs"), { mode: 0o700 });
   writeJson(path.join(agent, "auth.json"), loaded.auth);
   writeJson(path.join(agent, "settings.json"), { packages: [], quietStartup: true });
-  const run: Run = { schema: 1, id, token: randomUUID(), dir, cwd, group, model, config: loaded.config,
+  const run: Run = { schema: 1, id, token: randomUUID(), dir, cwd, group, requestedModel, config: loaded.config,
     state: "starting", createdAt: now(), startedAt: now(), updatedAt: now(), restartCount: 0 };
   writeJson(path.join(dir, "run.json"), run);
   atomicWrite(path.join(dir, "001.in.md"), prompt);
@@ -149,7 +149,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (positionals.length > 2) throw new Error("Quote the prompt as a single argument");
   const run = await startRun(process.cwd(), positionals.at(-1)!, positionals.length === 2 ? command : undefined, values.group);
   if (values.json) console.log(JSON.stringify(run, null, 2));
-  else console.log(`Run: ${run.id}\nState: ${run.state}\nDirectory: ${run.dir}\nReply: ${path.join(run.dir, "001.out.md")}`);
+  else console.log(`Run: ${run.id}\nState: ${run.state}\nModel: ${run.model?.provider}/${run.model?.model} (thinking: ${run.model?.thinking ?? "unknown"})\nDirectory: ${run.dir}\nReply: ${path.join(run.dir, "001.out.md")}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {

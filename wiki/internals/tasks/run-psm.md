@@ -2,10 +2,11 @@
 
 ## Before You Begin
 
+- 完整安装、升级与卸载流程见仓库根目录 [install.md](../../../install.md)。
 - 使用 Linux、WSL 或 macOS，安装 Node.js >= 22.19 和 Pi >= 1.5。
 - 在仓库执行 `npm install --ignore-scripts --legacy-peer-deps`。
 - 执行 `npm link --ignore-scripts --legacy-peer-deps` 安装全局 `psm` / `garden` 命令；也可直接 `node /path/to/repo/src/psm/cli.ts`。
-- 在 `~/.psm/config.json` 或项目 `.psm/config.json` 配置模型别名；模型 endpoint 和认证参见 [配置参考](../reference/psm.md)。不会自动使用全局 Pi 认证。
+- 在 `~/.psm/config.json` 或项目 `.psm/config.json` 配置默认模型表达式；模型 endpoint 和认证参见 [配置参考](../reference/psm.md)。不会自动使用全局 Pi 认证。
 
 ## Steps
 
@@ -28,7 +29,7 @@
 
 ## Troubleshooting
 
-- 模型别名不存在：检查 `config.json.models`，不要直接依赖全局 pi 的默认模型。
+- 模型选择失败：检查命令行表达式或 `defaultModel`，有歧义时使用 `provider/model`；不使用 Pi TUI 默认模型。旧 `config.json.models` 别名表需删除并迁移为表达式。
 - 认证失败：检查 PSM 的 `models.json` / `auth.json` 或启动进程继承的 provider 环境变量。
 - 实时查看：`psm logs 1` 默认显示最近 100 行事件转换后的纯文本，并持续跟随；`--format json` 查看原始事件，`--no-follow` 只查看当前尾部。Ctrl+C 退出查看器，后台 run 继续执行。
 - 启动失败：查看返回目录下 `logs/stderr.log`、`run.json.error`，确认 piCommand 和 Pi 版本。

@@ -36,7 +36,7 @@ test("real Pi RPC with isolated local OpenAI-compatible endpoint", { skip: !proc
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address() as { port: number };
-  writeJson(path.join(home, "config.json"), { defaultModel: "local", models: { local: { provider: "psm-local", model: "psm-test" } },
+  writeJson(path.join(home, "config.json"), { defaultModel: "psm-local/psm-te:high",
     piCommand: [process.env.PSM_REAL_PI], pollMs: 50, stableMs: 100, startupTimeoutMs: 15000, turnTimeoutMs: 10000 });
   writeJson(path.join(home, "models.json"), { providers: { "psm-local": { baseUrl: `http://127.0.0.1:${address.port}/v1`,
     api: "openai-completions", apiKey: "local-test-only", models: [{ id: "psm-test", contextWindow: 32768, maxTokens: 256 }] } } });
@@ -47,6 +47,8 @@ test("real Pi RPC with isolated local OpenAI-compatible endpoint", { skip: !proc
   };
   try {
     const run = await startRun(cwd, "Reply briefly; do not call tools.");
+    assert.equal(run.requestedModel, "psm-local/psm-te:high");
+    assert.deepEqual(run.model, { provider: "psm-local", model: "psm-test", thinking: "off" });
     for (const n of ["001", "002"]) {
       if (n === "002") atomicWrite(path.join(run.dir, "002.in.md"), "Reply again using prior context; do not call tools.");
       await wait(() => ["completed", "failed", "interrupted"].includes(readJson(path.join(run.dir, `${n}.status.json`), {}).state));

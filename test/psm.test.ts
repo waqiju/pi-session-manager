@@ -8,6 +8,7 @@ import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { promisify } from "node:util";
 import { loadConfig, merge, selectModel } from "../src/psm/config.ts";
+import { requestStop, restartRun } from "../src/psm/lifecycle.ts";
 import { startRun } from "../src/psm/cli.ts";
 import { alive, findRun, inspectRun, listRuns } from "../src/psm/runs.ts";
 import { archiveFile, submitPrompt } from "../src/psm/interaction.ts";
@@ -24,7 +25,7 @@ function setup(t: any, extra = {}) {
   const home = path.join(root, "home");
   const cwd = path.join(root, "project with spaces");
   mkdirSync(cwd);
-  writeJson(path.join(home, "config.json"), { defaultModel: "fake", models: { fake: { provider: "fixture", model: "test" } },
+  writeJson(path.join(home, "config.json"), { defaultModel: "fixture/test",
     piCommand: [process.execPath, fixture], pollMs: 30, stableMs: 90, startupTimeoutMs: 3000, turnTimeoutMs: 5000, ...extra });
   const previous = process.env.PSM_HOME;
   process.env.PSM_HOME = home;
@@ -112,11 +113,51 @@ test("archive failure preserves successful reply with unavailable detail marker"
   assert.match(readFileSync(path.join(run.dir, "001.out.md"), "utf8"), /detail_status: unavailable[\s\S]*reply 1: first/);
 });
 
+test("Pi resolves expressions; restart pins actual selection and supports legacy records", async (t) => {
+  const { cwd, home } = setup(t);
+  const run = await startRun(cwd, "first", "fuzzy:high");
+  assert.equal(run.requestedModel, "fuzzy:high");
+  assert.deepEqual(run.model, { provider: "fixture", model: "test", thinking: "high" });
+  const args = readJson(path.join(run.dir, "observed.json")).args;
+  assert.equal(args.includes("--provider"), false);
+  assert.equal(args[args.indexOf("--model") + 1], "fuzzy:high");
+  await until(() => status(run.dir, "001").state === "completed");
+  await requestStop(run.dir);
+  await until(() => inspectRun(run.dir).state === "stopped");
+  writeJson(path.join(home, "config.json"), { defaultModel: "changed", models: { old: {} } });
+  const restarted = await restartRun(run.dir);
+  assert.deepEqual(restarted.model, run.model);
+  const pinnedArgs = readJson(path.join(run.dir, "observed.json")).args;
+  assert.equal(pinnedArgs[pinnedArgs.indexOf("--provider") + 1], "fixture");
+  assert.equal(pinnedArgs[pinnedArgs.indexOf("--model") + 1], "test");
+  assert.equal(pinnedArgs[pinnedArgs.indexOf("--thinking") + 1], "high");
+  await requestStop(run.dir);
+  await until(() => inspectRun(run.dir).state === "stopped");
+  const legacy = readJson(path.join(run.dir, "run.json"));
+  delete legacy.requestedModel;
+  delete legacy.model.thinking;
+  legacy.config.models = { old: { provider: "fixture", model: "test" } };
+  writeJson(path.join(run.dir, "run.json"), legacy);
+  assert.equal((await restartRun(run.dir)).model?.model, "test");
+});
+
+test("unresolved models never consume prompts and failed starts can retry expressions", async (t) => {
+  const { cwd } = setup(t);
+  await assert.rejects(startRun(cwd, "never consumed", "missing"), /did not resolve/);
+  const run = listRuns(undefined, true)[0];
+  assert.equal(run.model, undefined);
+  assert.equal(existsSync(path.join(run.dir, "001.status.json")), false);
+  const retry = readJson(path.join(run.dir, "run.json"));
+  retry.requestedModel = "fuzzy";
+  writeJson(path.join(run.dir, "run.json"), retry);
+  assert.equal((await restartRun(run.dir)).model?.model, "test");
+});
+
 test("configuration merges ordinary fields and selects a whole models file", (t) => {
   const { home, cwd } = setup(t);
   writeJson(path.join(home, "models.json"), { providers: { demo: { baseUrl: "https://example.invalid", models: [{ id: "a", maxTokens: 100 }, { id: "b" }] } } });
   writeJson(path.join(cwd, ".psm/models.json"), { providers: { demo: { models: [{ id: "a", maxTokens: 200 }] } } });
-  writeJson(path.join(cwd, ".psm/config.json"), { models: { fake: { thinking: "high" } } });
+  writeJson(path.join(cwd, ".psm/config.json"), { defaultModel: "fixture/test:high" });
   const loaded = loadConfig(cwd);
   assert.equal(loaded.modelsFile, path.join(cwd, ".psm/models.json"));
   assert.equal(readJson(loaded.modelsFile!).providers.demo.models.length, 1);
@@ -127,9 +168,12 @@ test("configuration merges ordinary fields and selects a whole models file", (t)
   rmSync(path.join(cwd, ".psm/models.json"));
   rmSync(path.join(home, "models.json"));
   assert.equal(loadConfig(cwd).modelsFile, undefined);
-  assert.deepEqual(selectModel(loaded.config), { provider: "fixture", model: "test", thinking: "high" });
+  assert.equal(selectModel(loaded.config), "fixture/test:high");
   assert.deepEqual(loaded.auth, {});
-  assert.throws(() => selectModel(loaded.config, "unknown"), /Unknown/);
+  assert.equal(selectModel(loaded.config, "unknown"), "unknown");
+  assert.throws(() => selectModel({ ...loaded.config, defaultModel: undefined }), /Specify/);
+  writeJson(path.join(cwd, ".psm/config.json"), { models: {} });
+  assert.throws(() => loadConfig(cwd), /aliases are no longer supported/);
   assert.throws(() => merge({}, JSON.parse('{"__proto__":{}}')), /Invalid/);
   writeJson(path.join(cwd, ".psm/config.json"), { pollMs: 0 });
   assert.throws(() => loadConfig(cwd), /pollMs/);
@@ -236,7 +280,7 @@ test("CLI exits while worker survives; status/list/stop work from another cwd", 
 });
 
 test("stop cancels a worker blocked during RPC startup", async (t) => {
-  const { cwd, home } = setup(t, { models: { fake: { provider: "fixture", model: "startup-hang" } }, startupTimeoutMs: 15000 });
+  const { cwd, home } = setup(t, { defaultModel: "fixture/startup-hang", startupTimeoutMs: 15000 });
   const starting = startRun(cwd, "first").catch((error) => error);
   const run = await until(() => listRuns(home, true).find((r) => r.alive));
   writeJson(path.join(run.dir, "stop.json"), { token: run.token });

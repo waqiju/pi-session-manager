@@ -12,7 +12,8 @@ export interface Run {
   dir: string;
   cwd: string;
   group: string;
-  model: ModelChoice;
+  model?: ModelChoice;
+  requestedModel?: string;
   config: Config;
   state: "starting" | "idle" | "running" | "stopping" | "stopped" | "failed" | "interrupted";
   createdAt: string;

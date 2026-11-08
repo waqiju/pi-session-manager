@@ -109,17 +109,29 @@ export async function work(dir: string, token: string): Promise<void> {
     const env = { ...process.env, PI_CODING_AGENT_DIR: agent, PI_CODING_AGENT_SESSION_DIR: dir, PI_GARDEN: "0" };
     for (const key of ["PI_SESSION_ID", "PI_SESSION_FILE", "PI_PROVIDER", "PI_MODEL", "PI_REASONING_LEVEL"]) delete env[key];
     const command = [...run.config.piCommand, "--mode", "rpc", "--session", path.join(dir, "session.jsonl"),
-      "--session-dir", dir, "--provider", run.model.provider, "--model", run.model.model,
+      "--session-dir", dir,
       "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-mcp", "--no-approve", "--offline"];
-    if (run.model.thinking) command.push("--thinking", run.model.thinking);
+    const pinned = run.model;
+    if (pinned) {
+      command.push("--provider", pinned.provider, "--model", pinned.model);
+      if (pinned.thinking) command.push("--thinking", pinned.thinking);
+    } else {
+      if (!run.requestedModel) throw new Error("Missing requested model expression");
+      command.push("--model", run.requestedModel);
+    }
     rpc = new Rpc(command, { cwd: run.cwd, env, log, event });
     rpc.onFailure = (error) => { if (!stopping) fatal = error.message; };
     run.piPid = rpc.child.pid;
     run.piIdentity = run.piPid ? processIdentity(run.piPid) : undefined;
     persist();
     const state = await rpc.request("get_state", {}, run.config.startupTimeoutMs);
-    if (state?.model?.id !== run.model.model || state?.model?.provider !== run.model.provider)
-      throw new Error("Pi selected a different model; exact provider/model match required");
+    if (typeof state?.model?.id !== "string" || !state.model.id || typeof state.model.provider !== "string" || !state.model.provider)
+      throw new Error("Pi did not resolve a model");
+    if (pinned && (state.model.id !== pinned.model || state.model.provider !== pinned.provider ||
+      (pinned.thinking !== undefined && state.thinkingLevel !== pinned.thinking)))
+      throw new Error("Pi selected a different model or thinking level; restart requires the previously resolved selection");
+    run.model = { provider: state.model.provider, model: state.model.id,
+      ...(typeof state.thinkingLevel === "string" ? { thinking: state.thinkingLevel } : {}) };
     transition("idle");
     while (!stopping && !fatal) {
       if (existsSync(path.join(dir, "stop.json"))) {

@@ -27,7 +27,7 @@ function setup(t: any, extra = {}) {
   const home = path.join(root, "home");
   const cwd = path.join(root, "project");
   mkdirSync(cwd);
-  writeJson(path.join(home, "config.json"), { defaultModel: "fake", models: { fake: { provider: "fixture", model: "test" } },
+  writeJson(path.join(home, "config.json"), { defaultModel: "fixture/test",
     piCommand: [process.execPath, fixture], pollMs: 20, stableMs: 60, startupTimeoutMs: 3000, turnTimeoutMs: 5000, ...extra });
   const previous = process.env.PSM_HOME;
   process.env.PSM_HOME = home;

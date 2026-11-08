@@ -2,10 +2,15 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 const args = process.argv.slice(2);
-const value = (flag: string) => args[args.indexOf(flag) + 1];
+const value = (flag: string) => args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined;
 const session = value("--session");
 const dir = path.dirname(session);
-const model = { provider: value("--provider"), id: value("--model") };
+const expression = value("--model")!;
+const [reference, suffix] = expression.split(":");
+const slash = reference.indexOf("/");
+const model = { provider: value("--provider") || (slash >= 0 ? reference.slice(0, slash) : "fixture"),
+  id: slash >= 0 ? reference.slice(slash + 1) : reference === "fuzzy" ? "test" : reference };
+const thinkingLevel = value("--thinking") || suffix || "off";
 const send = (record: unknown) => process.stdout.write(JSON.stringify(record) + "\r\n");
 let seq = 0;
 let parentId: string | null = null;
@@ -36,7 +41,7 @@ process.stdin.on("data", (chunk) => {
     const command = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
     if (command.type === "get_state") {
       if (model.id === "startup-hang") continue;
-      send({ type: "response", id: command.id, success: true, data: { model } });
+      send({ type: "response", id: command.id, success: true, data: { model: model.id === "missing" ? undefined : model, thinkingLevel } });
     }
     if (command.type === "prompt") {
       appendFileSync(path.join(dir, "prompts.jsonl"), JSON.stringify(command) + "\n");

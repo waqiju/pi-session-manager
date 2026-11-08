@@ -14,7 +14,7 @@ export function formatRuns(runs: (Run & { alive: boolean })[], columns = 120): s
   const clean = (text: string) => stripAnsi(text).replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
   const rows = [["ID", "STATE", "ALIVE", "GROUP", "MODEL", "TURN", "UPDATED"],
     ...runs.map((run) => [run.id, run.state, run.alive ? "yes" : "no", run.group,
-      `${run.model.provider}/${run.model.model}`, run.currentTurn || run.lastTurn || "-", localTime(run.updatedAt)])]
+      run.model ? `${run.model.provider}/${run.model.model}` : `pending: ${run.requestedModel || "-"}`, run.currentTurn || run.lastTurn || "-", localTime(run.updatedAt)])]
     .map((row) => row.map(clean));
   const widths = rows[0].map((_, i) => Math.max(...rows.map((row) => visibleWidth(row[i]))));
   const budget = Math.max(29, columns - (widths.length * 3 + 1));

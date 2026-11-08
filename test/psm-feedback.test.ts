@@ -55,7 +55,7 @@ test("new runs link the selected models file without copying it", async (t) => {
   t.after(() => { if (previous === undefined) delete process.env.PSM_HOME; else process.env.PSM_HOME = previous; });
   const cwd = path.join(root, "project");
   mkdirSync(cwd);
-  writeJson(path.join(root, "config.json"), { defaultModel: "fake", models: { fake: { provider: "fixture", model: "test" } },
+  writeJson(path.join(root, "config.json"), { defaultModel: "fixture/test",
     piCommand: [process.execPath, new URL("./fixtures/psm-fake-pi.ts", import.meta.url).pathname], pollMs: 30, stableMs: 90 });
   const source = path.join(root, "models.json");
   writeJson(source, { providers: {} });

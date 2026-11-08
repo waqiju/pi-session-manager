@@ -3,7 +3,7 @@
 ## CLI
 
 ```bash
-psm <model-alias> "首条 prompt" [--group research] [--json]
+psm <model-expression> "首条 prompt" [--group research] [--json]
 psm "首条 prompt"                       # config.defaultModel
 psm list [--all] [--group research] [--json]
 psm status 1                           # 1 / 01 / 000001 均指向 000001
@@ -21,11 +21,11 @@ psm prompt 1 --file ./prompt.md [--json]
 psm --help
 ```
 
-prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`restart`、`open`、`prompt`、`logs` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型别名消除歧义。
+prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`restart`、`open`、`prompt`、`logs` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型表达式消除歧义。
 
 默认 `list` 显示最近 24 小时有活动的 run，加上所有仍存活的 run；`--all` 显示全部注册历史。注册表跨 cwd，位于 `~/.psm/registry/`。已删除 run 目录的记录跳过。所有按 run 操作的命令接受 1～6 位数字简写，补齐六位后精确匹配；0 或超过六位的数字无效，数字不作前缀查询。历史非数字 ID 仍可用唯一前缀。status 输出 JSON；stop 最多等待 10 秒，超时返回非零并提示停止请求尚未确认。
 
-启动命令在 worker 和 Pi 就绪后返回 run ID、目录和首轮结果路径；不会向终端输出模型回答。启动失败返回非零并提供 run 目录。命令成功只表示后台就绪，后续模型错误见轮次状态。
+启动命令在 worker 和 Pi 就绪后返回 run ID、实际 provider/model、thinking、目录和首轮结果路径；不会向终端输出模型回答。启动失败返回非零并提供 run 目录。命令成功只表示后台就绪，后续模型错误见轮次状态。
 
 ## 打开归档与追加 prompt
 
@@ -33,7 +33,7 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
 
 `psm prompt 1 "文本"` 与 `psm prompt 1 --file ./prompt.md` 二选一。文件相对 CLI 当前目录解析，UTF-8 内容原样读取，不执行附件展开。空白 prompt 拒绝；以 `-` 开头的文本使用 `psm prompt 1 -- "-文本"`。命令返回已发布的轮次及输入/输出路径，`--json` 返回结构化结果；这只代表入队，不代表模型完成。
 
-首参数为纯数字且带第二个位置参数或 `--file` 时，`psm 1 "文本"` / `psm 1 --file ./prompt.md` 等同于显式 `psm prompt`，也支持 `--json`。数字必须为 1～6 位且大于零；无效或不存在的 ID 直接报错，不回退创建 run。该形式下纯数字模型别名让位给 run ID；单独 `psm "123"` 仍使用默认模型创建首条 prompt 为 `123` 的 run。
+首参数为纯数字且带第二个位置参数或 `--file` 时，`psm 1 "文本"` / `psm 1 --file ./prompt.md` 等同于显式 `psm prompt`，也支持 `--json`。数字必须为 1～6 位且大于零；无效或不存在的 ID 直接报错，不回退创建 run。该形式下纯数字模型表达式让位给 run ID；单独 `psm "123"` 仍使用默认模型创建首条 prompt 为 `123` 的 run。
 
 同一 run 的 CLI 提交通过 `control.lock/` 串行分配连续编号，并与停止请求、restart 和 idle 超时判定互斥。临时文件写完后以不覆盖目标的原子硬链接发布，最后移除临时文件。手工文件若抢先占用编号，命令报错而不覆盖；已有编号缺口需先修复。锁等待最多 5 秒；持锁进程意外退出可能遗留锁，查看 `control.lock/owner.json` 并确认所属进程已退出后才能删除该目录重试，不自动按锁年龄回收。仅接受存活的 idle/running run；running 时排队，不作 steering，不隐式恢复已停止的 run。与手动停止并发时，已发布输入也可能留在队列未执行，应检查状态。
 
@@ -80,13 +80,7 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
 
 ```json
 {
-  "defaultModel": "deepseek",
-  "models": {
-    "deepseek": {
-      "provider": "deepseek",
-      "model": "deepseek-chat"
-    }
-  },
+  "defaultModel": "deepseek/deepseek-chat",
   "piCommand": ["pi"],
   "pollMs": 500,
   "stableMs": 1000,
@@ -96,7 +90,11 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
 }
 ```
 
-模型别名必需且精确映射；不把别名当作 Pi 的 fuzzy model pattern。运行时再次核对 Pi 返回的 provider/model。可选 `thinking` 取值：`off|minimal|low|medium|high|xhigh|max`，最终支持程度由 Pi/模型决定。
+模型选择顺序为命令行表达式 → 合并后的 PSM `defaultModel`；均未提供时直接报错，不使用 Pi TUI 默认值。PSM 把表达式原样传给 Pi `--model`，支持精确 ID、ID/名称模糊匹配、`provider/model` 及 `:thinking` 后缀。Pi 负责匹配及歧义诊断；跨 provider 匹配会考虑认证配置，仍有歧义时需写明 provider。指定 provider 的未知 ID 可能由 Pi 作为自定义 ID 接受，就绪不代表远端 API 一定支持该模型。
+
+`run.json.requestedModel` 保存输入表达式；RPC `get_state` 返回的实际 provider、model ID 与 thinking 保存到 `run.json.model`，首轮消费前落盘。启动输出和 list 显示实际模型，尚未解析时 list 显示 pending。restart 使用保存的精确模型和 thinking 并核对返回值；没有成功解析过的启动失败重试原表达式。历史 run 的模型记录继续可用。
+
+`config.json.models` 别名映射已移除，残留该字段会报迁移提示。把旧别名对应的 `provider/model[:thinking]` 写入 `defaultModel` 和启动命令，再删除该字段；`models.json` 中的 provider 定义保持原样。thinking 支持值与实际生效级别由 Pi/模型决定，包括 `off|minimal|low|medium|high|xhigh|max`。
 
 `piCommand` 是可执行文件与前置参数的 argv 数组，不经过 shell。默认使用 PATH 中的 `pi`；也可配置 `["/absolute/path/to/pi"]` 或 `["node", "/absolute/path/to/pi/cli.js"]`。不要在 argv 中放凭据。未知配置字段会报错。
 

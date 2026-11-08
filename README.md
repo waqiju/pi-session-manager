@@ -6,6 +6,8 @@ PSM 1.0：通过文件驱动的后台 pi 会话管理器，附带 garden Markdow
 
 要求：Node.js >= 22.19、Pi >= 1.5；支持 Linux / WSL / macOS，暂不支持原生 Windows。
 
+安装入口：[install.md](install.md)。可直接把该文件的 GitHub 链接交给 Agent，完成从 master 安装、配置与全局命令验证。
+
 ```bash
 npm install --ignore-scripts --legacy-peer-deps
 npm link --ignore-scripts --legacy-peer-deps
@@ -23,16 +25,15 @@ psm stop 1
 psm restart 1                    # 重新启动 worker，恢复原会话；不重放中断轮次
 ```
 
-先在 `~/.psm/config.json` 配置模型别名，例如：
+先在 `~/.psm/config.json` 配置后台默认模型，例如：
 
 ```json
 {
-  "defaultModel": "deepseek",
-  "models": {
-    "deepseek": { "provider": "deepseek", "model": "deepseek-chat" }
-  }
+  "defaultModel": "deepseek/deepseek-chat"
 }
 ```
+
+模型参数和 `defaultModel` 直接使用 Pi 的模型表达式（精确 ID、模糊名称、`provider/model` 或 `:thinking` 后缀），无需维护别名映射。启动输出和列表显示 Pi 实际选中的模型；restart 固定已解析的模型和 thinking。旧 `config.json.models` 需删除并将默认值改为模型表达式。
 
 模型 endpoint 和认证通过 PSM 自己的 `models.json` / `auth.json` 或 provider 环境变量配置，
 不读取全局 Pi 配置/凭据。当前目录 `.psm/` 的同名配置覆盖全局配置。
