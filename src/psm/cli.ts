@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { loadPipeline, preparePipeline, type Pipeline } from "./pipeline.ts";
 import { loadConfig, selectModel } from "./config.ts";
 import { atomicWrite, delay, now, writeJson } from "./files.ts";
 import { formatRuns } from "./table.ts";
@@ -17,6 +18,8 @@ const usage = `psm — file-driven background Pi sessions (Pi >= 1.5; Linux/WSL/
 
   psm <model-expression> <first-prompt> [--group <name>]
   psm <first-prompt>                 Use config.defaultModel
+  psm run <pipeline> <first-prompt> [--group <name>] [--json]
+  psm run <pipeline> --file <path>   Run .psm/<pipeline>/pipeline.mjs (local, then global)
   psm list [--all] [--group <name>] [--json]
   psm status <run-id>                JSON status; numeric IDs accept shorthand (1 = 000001)
   psm open <run-id> [--level l1|l3]   Open archive (default L3) using the garden system opener
@@ -35,11 +38,17 @@ Create 002.in.md, 003.in.md, ... in the returned directory for subsequent turns.
 Publish inputs by renaming a temporary file. Completed replies appear as NNN.out.md.
 `;
 
-export async function startRun(cwd: string, prompt: string, modelExpression?: string, group = "default"): Promise<Run> {
+export async function startPipeline(cwd: string, name: string, prompt: string, group?: string): Promise<Run> {
+  const pipeline = await loadPipeline(cwd, loadConfig(cwd).home, name);
+  return startRun(cwd, prompt, pipeline.model, group ?? pipeline.group ?? "default", pipeline);
+}
+
+export async function startRun(cwd: string, prompt: string, modelExpression?: string, group = "default", pipeline?: Pipeline): Promise<Run> {
   if (process.platform === "win32") throw new Error("Native Windows is not supported yet; use WSL");
   if (!prompt.trim()) throw new Error("First prompt must not be empty");
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(group)) throw new Error("Group must use 1–64 letters, numbers, '_' or '-'");
   const loaded = loadConfig(cwd);
+  if (pipeline) loaded.config = { ...loaded.config, ...pipeline.config };
   const requestedModel = selectModel(loaded.config, modelExpression);
   const id = allocateRunId(loaded.home);
   const dir = path.join(loaded.local, "runs", group, id);
@@ -49,7 +58,9 @@ export async function startRun(cwd: string, prompt: string, modelExpression?: st
   mkdirSync(path.join(dir, "logs"), { mode: 0o700 });
   writeJson(path.join(agent, "auth.json"), loaded.auth);
   writeJson(path.join(agent, "settings.json"), { packages: [], quietStartup: true });
+  if (pipeline) preparePipeline(pipeline, agent, cwd);
   const run: Run = { schema: 1, id, token: randomUUID(), dir, cwd, group, requestedModel, config: loaded.config,
+    ...(pipeline ? { pipeline } : {}),
     state: "starting", createdAt: now(), startedAt: now(), updatedAt: now(), restartCount: 0 };
   writeJson(path.join(dir, "run.json"), run);
   atomicWrite(path.join(dir, "001.in.md"), prompt);
@@ -71,8 +82,16 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
   if (command !== "logs" && (values.format !== undefined || values.lines !== undefined || values["no-follow"]))
     throw new Error("--format, --lines and --no-follow are for logs");
-  if (values.file !== undefined && command !== "prompt") throw new Error("--file is for prompt");
+  if (values.file !== undefined && !["prompt", "run"].includes(command)) throw new Error("--file is for prompt/run");
   if (values.level !== undefined && command !== "open") throw new Error("--level is for open");
+  if (command === "run") {
+    if (values.all || (values.file !== undefined ? rest.length !== 1 : rest.length !== 2))
+      throw new Error("Usage: psm run <pipeline> <text> OR psm run <pipeline> --file <path> [--group <name>] [--json]");
+    const prompt = values.file !== undefined ? readFileSync(path.resolve(values.file), "utf8") : rest[1];
+    const run = await startPipeline(process.cwd(), rest[0], prompt, values.group);
+    printStarted(run, !!values.json);
+    return;
+  }
   if (command === "logs") {
     if (rest.length !== 1 || values.all || values.group || values.json) throw new Error("Usage: psm logs <run-id> [--format text|json] [--lines 100] [--no-follow]");
     const format = values.format ?? "text";
@@ -148,8 +167,12 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
   if (positionals.length > 2) throw new Error("Quote the prompt as a single argument");
   const run = await startRun(process.cwd(), positionals.at(-1)!, positionals.length === 2 ? command : undefined, values.group);
-  if (values.json) console.log(JSON.stringify(run, null, 2));
-  else console.log(`Run: ${run.id}\nState: ${run.state}\nModel: ${run.model?.provider}/${run.model?.model} (thinking: ${run.model?.thinking ?? "unknown"})\nDirectory: ${run.dir}\nReply: ${path.join(run.dir, "001.out.md")}`);
+  printStarted(run, !!values.json);
+}
+
+function printStarted(run: Run, json: boolean): void {
+  if (json) console.log(JSON.stringify(run, null, 2));
+  else console.log(`Run: ${run.id}\nState: ${run.state}\n${run.pipeline ? `Pipeline: ${run.pipeline.name} (${run.pipeline.resources})\n` : ""}Model: ${run.model?.provider}/${run.model?.model} (thinking: ${run.model?.thinking ?? "unknown"})\nDirectory: ${run.dir}\nReply: ${path.join(run.dir, "001.out.md")}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {

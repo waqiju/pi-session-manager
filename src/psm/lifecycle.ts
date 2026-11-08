@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { processIdentity, processPresent, withRunLock } from "./control.ts";
 import { delay, now, readJson, writeJson } from "./files.ts";
+import { checkPipeline } from "./pipeline.ts";
 import { inspectRun, type Run } from "./runs.ts";
 
 export async function launchWorker(run: Run): Promise<Run> {
@@ -94,6 +95,7 @@ export async function restartRun(dir: string): Promise<Run & { pendingTurns: str
     const deadline = Date.now() + 1500;
     while (processes() && Date.now() < deadline) await delay(50);
     if (processes()) throw new Error("Cannot restart: previous worker or Pi process still exists (even if its heartbeat is stale)");
+    checkPipeline(run.pipeline);
     const { statuses, pendingTurns } = recoveryPlan(run);
     appendFileSync(path.join(dir, "logs", "restarts.jsonl"), JSON.stringify({ at: now(), previous: run, pendingTurns }) + "\n", { mode: 0o600 });
     for (const status of statuses) {

@@ -140,6 +140,9 @@ export class TextEvents {
     if (event.type === "auto_retry_end") return this.label(`retry ${event.success ? "succeeded" : "ended"}${event.finalError ? `: ${summary(event.finalError)}` : ""}`);
     if (event.type === "auto_compaction_start") return this.label("compacting context");
     if (event.type === "auto_compaction_end") return this.label("context compaction ended");
+    if (event.type === "extension_error") return this.label(`extension error: ${summary(event.error)}`);
+    if (event.type === "extension_ui_request" && ["select", "confirm", "input", "editor"].includes(event.method))
+      return this.label(`error: extension requested interactive ${event.method}; PSM has no interactive UI`);
     if (event.type === "response" && event.success === false) return this.label(`error: ${summary(event.error)}`);
     return "";
   }

@@ -12,6 +12,7 @@ PSM 1.0：通过文件驱动的后台 pi 会话管理器，附带 garden Markdow
 npm install --ignore-scripts --legacy-peer-deps
 npm link --ignore-scripts --legacy-peer-deps
 psm deepseek "分析当前项目结构"    # 就绪后返回 run ID 和目录，在后台继续执行
+psm run web-search "搜索近期新闻"  # JS pipeline；示例安装见下文
 psm list                         # 最近 24 小时有活动的 run + 所有存活 run
 psm status 1                     # 数字 ID 自动补齐为 000001
 psm open 1                       # 使用 garden 的系统打开器查看 L3
@@ -36,7 +37,7 @@ psm restart 1                    # 重新启动 worker，恢复原会话；不�
 模型参数和 `defaultModel` 直接使用 Pi 的模型表达式（精确 ID、模糊名称、`provider/model` 或 `:thinking` 后缀），无需维护别名映射。启动输出和列表显示 Pi 实际选中的模型；restart 固定已解析的模型和 thinking。旧 `config.json.models` 需删除并将默认值改为模型表达式。
 
 模型 endpoint 和认证通过 PSM 自己的 `models.json` / `auth.json` 或 provider 环境变量配置，
-不读取全局 Pi 配置/凭据。当前目录 `.psm/` 的同名配置覆盖全局配置。
+不读取全局 Pi 的模型配置/凭据。当前目录 `.psm/` 的同名配置覆盖全局配置。
 完整配置示例见 [PSM 参考](wiki/internals/reference/psm.md)。
 
 每个 run 存放在 `<cwd>/.psm/runs/<group>/<run-id>/`，默认 group 为 `default`。
@@ -50,8 +51,15 @@ Pi 在调用命令时的 cwd 工作；首轮结果为 `001.out.md`，多轮交�
 中断轮次跳过，尚未开始的排队输入继续消费；没有排队输入时等待下一条 `psm prompt`。
 恢复不会回滚工具副作用，也不会从工具中断现场续跑。
 
-PSM 默认关闭自动加载的 Pi 插件、skills 和 MCP，保留默认工具与 cwd 的 AGENTS.md 上下文。
-第一期不提供自定义 system prompt 或崩溃自动重放。
+普通 `psm "prompt"` 继续关闭自动加载的 Pi 插件、skills 和 MCP，保留默认工具与 cwd 的 AGENTS.md 上下文。
+
+`psm run <pipeline> "prompt"` 加载 `.psm/<pipeline>/pipeline.mjs`（本地优先，再查全局）。
+JS 可以定制模型、thinking、group、资源和附加系统提示：`inherit` 继承指定 Pi 环境后增减资源，
+`isolated` 只加载明确指定的资源。两种模式都保留独立后台会话和 PSM 模型认证。
+
+仓库提供 `examples/pipelines/web-search/`，复制到 `.psm/web-search/` 或 `~/.psm/web-search/`
+即可使用 DeepSeek 官方 Search/Fetch API。配置、费用、资源继承和恢复规则见
+[JS pipeline 使用说明](wiki/internals/tasks/psm-pipelines.md)。
 
 [首次使用](wiki/internals/tasks/run-psm.md) · [架构与故障语义](wiki/internals/concepts/psm.md)
 

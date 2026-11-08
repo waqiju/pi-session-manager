@@ -8,6 +8,7 @@ import { refreshReplyDetails, replyDocument } from "./replies.ts";
 import { atomicWrite, delay, now, readJson, writeJson } from "./files.ts";
 import { Rpc, RpcRejection, type RecordValue } from "./rpc.ts";
 import { processIdentity, tryRunLock } from "./control.ts";
+import { checkPipeline, pipelineArgs } from "./pipeline.ts";
 import type { Run } from "./runs.ts";
 
 interface Turn {
@@ -69,7 +70,14 @@ export async function work(dir: string, token: string): Promise<void> {
   const event = (record: RecordValue) => {
     appendFileSync(path.join(dir, "logs", "events.jsonl"), JSON.stringify(record) + "\n", { mode: 0o600 });
     if (record.type === "extension_ui_request" && ["select", "confirm", "input", "editor"].includes(record.method)) {
+      const error = `Extension requested interactive ${record.method}; PSM runs have no interactive UI`;
+      log(`${error}\n`);
+      fatal = error;
       void rpc?.send({ type: "extension_ui_response", id: record.id, cancelled: true }).catch((e) => { fatal = e.message; });
+    }
+    if (record.type === "extension_error") {
+      fatal = `Extension failed (${record.extensionPath || "unknown"}, ${record.event || "unknown"}): ${record.error || "unknown error"}`;
+      log(`${fatal}\n`);
     }
     if (!current) return;
     if (record.type === "message_end" && record.message?.role === "assistant") {
@@ -80,7 +88,7 @@ export async function work(dir: string, token: string): Promise<void> {
     }
     if (record.type === "auto_retry_end" && record.success === false) current.error = record.finalError || "Retries exhausted";
     if (record.type === "agent_settled") {
-      const error = current.error;
+      const error = current.error || fatal;
       finish(record.aborted || current.aborted ? "aborted" : error ? "failed" : "completed", error);
     }
   };
@@ -105,12 +113,12 @@ export async function work(dir: string, token: string): Promise<void> {
     } catch (e: any) { fatal = e.message; rpc?.fail(e); }
   }, 1000);
   try {
+    checkPipeline(run.pipeline);
     const agent = path.join(dir, "agent");
     const env = { ...process.env, PI_CODING_AGENT_DIR: agent, PI_CODING_AGENT_SESSION_DIR: dir, PI_GARDEN: "0" };
     for (const key of ["PI_SESSION_ID", "PI_SESSION_FILE", "PI_PROVIDER", "PI_MODEL", "PI_REASONING_LEVEL"]) delete env[key];
     const command = [...run.config.piCommand, "--mode", "rpc", "--session", path.join(dir, "session.jsonl"),
-      "--session-dir", dir,
-      "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-mcp", "--no-approve", "--offline"];
+      "--session-dir", dir, ...pipelineArgs(run.pipeline)];
     const pinned = run.model;
     if (pinned) {
       command.push("--provider", pinned.provider, "--model", pinned.model);
@@ -132,6 +140,7 @@ export async function work(dir: string, token: string): Promise<void> {
       throw new Error("Pi selected a different model or thinking level; restart requires the previously resolved selection");
     run.model = { provider: state.model.provider, model: state.model.id,
       ...(typeof state.thinkingLevel === "string" ? { thinking: state.thinkingLevel } : {}) };
+    if (fatal) throw new Error(fatal);
     transition("idle");
     while (!stopping && !fatal) {
       if (existsSync(path.join(dir, "stop.json"))) {

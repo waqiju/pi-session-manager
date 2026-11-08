@@ -5,6 +5,8 @@
 ```bash
 psm <model-expression> "首条 prompt" [--group research] [--json]
 psm "首条 prompt"                       # config.defaultModel
+psm run web-search "搜索近期新闻" [--group research] [--json]
+psm run web-search --file ./question.md
 psm list [--all] [--group research] [--json]
 psm status 1                           # 1 / 01 / 000001 均指向 000001
 psm stop 1
@@ -21,11 +23,17 @@ psm prompt 1 --file ./prompt.md [--json]
 psm --help
 ```
 
-prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`restart`、`open`、`prompt`、`logs` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型表达式消除歧义。
+prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`restart`、`open`、`prompt`、`logs`、`run` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型表达式消除歧义。
 
 默认 `list` 显示最近 24 小时有活动的 run，加上所有仍存活的 run；`--all` 显示全部注册历史。注册表跨 cwd，位于 `~/.psm/registry/`。已删除 run 目录的记录跳过。所有按 run 操作的命令接受 1～6 位数字简写，补齐六位后精确匹配；0 或超过六位的数字无效，数字不作前缀查询。历史非数字 ID 仍可用唯一前缀。status 输出 JSON；stop 最多等待 10 秒，超时返回非零并提示停止请求尚未确认。
 
 启动命令在 worker 和 Pi 就绪后返回 run ID、实际 provider/model、thinking、目录和首轮结果路径；不会向终端输出模型回答。启动失败返回非零并提供 run 目录。命令成功只表示后台就绪，后续模型错误见轮次状态。
+
+## JS pipeline
+
+`psm run <name> <prompt>` 或 `psm run <name> --file <path>` 执行本地 `.psm/<name>/pipeline.mjs`，没有本地目录时查全局 PSM 目录。默认 `inherit` 继承指定 Pi agent 资源与项目资源；`isolated` 仅加载明确指定资源。模型认证仍由 PSM 配置提供。启动输出包含 pipeline 名称与模式，status 的 `pipeline` 保存解析后的配置与资源摘要。`--group` 优先于 pipeline group。
+
+restart 不再执行 JS，资源摘要不匹配时拒绝恢复；两种模式不影响现有文件协议。附加系统提示、工具选择和完整字段参见 [pipeline 使用说明](../tasks/psm-pipelines.md)。普通 `psm "prompt"` 的加载行为不变。
 
 ## 打开归档与追加 prompt
 
@@ -176,7 +184,7 @@ detail_end_line: 186
 ```bash
 npm test
 # 可选：真实 Pi + 本地模拟模型 API，无外部凭据或费用
-PSM_REAL_PI=/absolute/path/to/pi node --test test/psm-real-pi.test.ts
+PSM_REAL_PI=/absolute/path/to/pi node --test test/psm-real-pi.test.ts test/psm-pipeline-real.test.ts
 ```
 
 默认回归使用模拟 RPC 子进程，真实 Pi 集成测试未设置变量时跳过。macOS 使用相同 POSIX 实现，但是否完成实机验证见发布说明。

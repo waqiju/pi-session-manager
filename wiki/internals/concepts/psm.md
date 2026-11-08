@@ -21,6 +21,7 @@ CLI 等待 RPC `get_state` 成功并保存实际 provider/model/thinking 后返�
 | `src/psm/cli.ts` | 创建配置快照、注册 run、list/status/stop/restart/open/prompt/logs、数字 prompt 简写 |
 | `src/psm/lifecycle.ts` | worker 启动、停止请求、恢复前校验、轮次对账及 restart |
 | `src/psm/control.ts` | 控制锁、进程存活与启动身份检查 |
+| `src/psm/pipeline.ts` | JS pipeline 加载/校验、资源继承、启动参数与恢复前内容摘要检查 |
 | `src/psm/config.ts` | 全局/本地配置合并、模型表达式选择 |
 | `src/psm/worker.ts` | 输入串行消费、状态机、RPC 事件、归档、终止 |
 | `src/psm/rpc.ts` | 子进程、LF framing、请求关联、背压、关闭 |
@@ -38,9 +39,11 @@ PSM 不使用 garden 的旧目录推导和兄弟 session 重编号，也不自�
 
 每个 run 的 `agent/` 保存合并后的 `auth.json` 和独立 `settings.json`；`models.json` 使用符号链接指向当前目录或全局源文件（本地优先，整文件选择，不合并或复制），通过 `PI_CODING_AGENT_DIR` 传给 Pi；session 路径也显式指定。父会话的 `PI_SESSION_*`、模型标记被移除。
 
-凭据只从 PSM 的 `auth.json`、`models.json` 或继承的 provider 环境变量解析；不读取或复制 `~/.pi/agent` 的凭据。Pi 的内置模型目录仍可使用，但 PSM 必须提供模型表达式或自己的 defaultModel。运行配置与认证快照只对新 run 生效。模型文件不保留快照，源文件修改会影响后续加载；已有 Pi 进程的重载时机由 Pi 决定。
+模型凭据只从 PSM 的 `auth.json`、`models.json` 或继承的 provider 环境变量解析；不读取或复制源 Pi 的模型认证。Pi 的内置模型目录仍可使用，但 PSM 必须提供模型表达式或自己的 defaultModel。运行配置与认证快照只对新 run 生效。模型文件不保留快照，源文件修改会影响后续加载；已有 Pi 进程的重载时机由 Pi 决定。
 
-第一期关闭自动发现的 extensions、skills、prompt templates、themes 和 MCP，并忽略项目 `.pi` 的信任门控资源，防止全局插件隐式加入后台执行。Pi 的默认工具与调用 cwd 的 `AGENTS.md` 上下文仍生效。PSM 没有自定义 system prompt 配置。`--offline` 禁止 Pi 的自动模型目录更新等联网活动，不禁止模型 API 请求。
+普通启动关闭自动发现的 extensions、skills、prompt templates、themes 和 MCP，并忽略项目 `.pi` 的信任门控资源。Pi 的默认工具与调用 cwd 的 `AGENTS.md` 上下文仍生效。`psm run` 加载 JS pipeline：`inherit` 继承指定 agent 的资源配置和指令并在当前进程加载项目 `.pi` 资源；`isolated` 禁止自动发现和上下文文件，只加载显式资源。pipeline 可追加系统提示、选择工具和配置模型/PSM 参数。继承不复制源 Pi 的模型认证，PSM auth/models 规则保持有效。参见 [pipeline 使用说明](../tasks/psm-pipelines.md)。`--offline` 禁止 Pi 的自动模型目录更新等联网活动，不禁止模型 API 请求。
+
+pipeline 首次执行的结果存入 run 元数据，restart 不执行 JS；启动和恢复前校验资源内容摘要。MCP/settings 等私有副本仅供本 run 使用，扩展和 package 保留原路径/依赖引用。摘要校验范围与依赖限制见使用说明。扩展 RPC 交互请求不能静默当作成功：PSM 取消 select/confirm/input/editor 并终止 run，扩展事件错误也记录为失败。
 
 文件默认 0600，新建目录默认 0700；WSL 的 Windows 挂载盘实际权限取决于挂载配置。完整事件、session 和日志包含对话及工具数据，不作为脱敏日志。`run.json` 不嵌入 models/auth 凭据；不要把密钥放进 `piCommand` 参数。
 

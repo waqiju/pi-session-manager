@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { psmHome } from "./config.ts";
+import type { Pipeline } from "./pipeline.ts";
 import type { Config, ModelChoice } from "./config.ts";
 import { processPresent } from "./control.ts";
 import { readJson } from "./files.ts";
@@ -15,6 +16,7 @@ export interface Run {
   model?: ModelChoice;
   requestedModel?: string;
   config: Config;
+  pipeline?: Pipeline;
   state: "starting" | "idle" | "running" | "stopping" | "stopped" | "failed" | "interrupted";
   createdAt: string;
   updatedAt: string;
