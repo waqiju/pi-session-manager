@@ -11,6 +11,8 @@ psm models [search]                    # 当前 PSM 配置下的可用模型
 psm pipelines [--json]                 # 发现启动方案，不执行 JS
 psm list [--all] [--group research] [--json]
 psm status 1                           # 1 / 01 / 000001 均指向 000001
+psm wait 1                            # 等待调用时最新已提交的一轮
+psm wait 1 --turn 2 --timeout 300 --json
 psm stop 1
 psm restart 1 [--json]                 # 恢复原会话，不重放中断轮次
 psm open 1                             # 系统默认应用打开 L3
@@ -25,7 +27,7 @@ psm prompt 1 --file ./prompt.md [--json]
 psm --help
 ```
 
-prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`restart`、`open`、`prompt`、`logs`、`run`、`models`、`pipelines` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型表达式消除歧义。
+prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`restart`、`open`、`prompt`、`wait`、`logs`、`run`、`models`、`pipelines` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型表达式消除歧义。
 
 默认 `list` 显示最近 24 小时有活动的 run，加上所有仍存活的 run；`--all` 显示全部注册历史。注册表跨 cwd，位于 `~/.psm/registry/`。已删除 run 目录的记录跳过。所有按 run 操作的命令接受 1～6 位数字简写，补齐六位后精确匹配；0 或超过六位的数字无效，数字不作前缀查询。历史非数字 ID 仍可用唯一前缀。status 输出 JSON；stop 最多等待 10 秒，超时返回非零并提示停止请求尚未确认。
 
@@ -54,6 +56,30 @@ restart 不再执行 JS，资源摘要不匹配时拒绝恢复；两种模式不
 首参数为纯数字且带第二个位置参数或 `--file` 时，`psm 1 "文本"` / `psm 1 --file ./prompt.md` 等同于显式 `psm prompt`，也支持 `--json`。数字必须为 1～6 位且大于零；无效或不存在的 ID 直接报错，不回退创建 run。该形式下纯数字模型表达式让位给 run ID；单独 `psm "123"` 仍使用默认模型创建首条 prompt 为 `123` 的 run。
 
 同一 run 的 CLI 提交通过 `control.lock/` 串行分配连续编号，并与停止请求、restart 和 idle 超时判定互斥。临时文件写完后以不覆盖目标的原子硬链接发布，最后移除临时文件。手工文件若抢先占用编号，命令报错而不覆盖；已有编号缺口需先修复。锁等待最多 5 秒；持锁进程意外退出可能遗留锁，查看 `control.lock/owner.json` 并确认所属进程已退出后才能删除该目录重试，不自动按锁年龄回收。仅接受存活的 idle/running run；running 时排队，不作 steering，不隐式恢复已停止的 run。与手动停止并发时，已发布输入也可能留在队列未执行，应检查状态。
+
+## 等待单轮完成
+
+`psm wait <id> [--turn <number>] [--timeout <seconds>] [--json]` 安静等待一轮结束，不输出实时日志，也不调用模型。省略 `--turn` 时固定命令开始观察时最新已提交的 `.in.md` 轮次；后续追加输入不会改变等待目标。显式轮次接受 1～999（如 `2` 或 `002`），必须已经提交。并发调用方应使用 `psm prompt --json` 返回的 `number` 指定轮次。
+
+默认不限等待时间；`--timeout` 是正数秒，支持小数，只限制等待命令，不改变 worker 的 `turnTimeoutMs`。外层 agent 工具仍需提供足够的执行时限。等待采用 500ms 本地状态检查，不消耗模型 token。短暂缺失 `run.json` 可重试最多 2 秒；持续缺失、损坏 JSON 或权限错误会报错。
+
+完成依据是目标轮次 `.status.json` 的终态，不是 run 的 idle、进程退出或 `.out.md` 存在。已结束的目标立即返回，即使 run 后来已经停止；仍在队列或执行中的目标继续等待。run 停止、失败或失联而目标没有终态时返回 `unavailable`，不自动 restart，也不修改轮次状态。
+
+| 状态 | 退出码 | 说明 |
+|---|---|---|
+| completed | 0 | 成功，返回回复文件路径，不打印正文 |
+| handled | 0 | 扩展已处理，没有模型回复 |
+| failed / aborted / interrupted | 1 | 单轮失败、取消或中断，返回已有错误信息 |
+| unavailable | 1 | run 已停止或失联，目标尚未完成 |
+| timeout | 124 | 仅等待超时，后台继续执行 |
+| cancelled | 130 / 143 | SIGINT / SIGTERM 退出等待，后台继续执行 |
+
+普通输出包含 Run、Turn、State，成功时包含 Reply；诊断写 stderr。`--json` 输出单个对象，字段为 `id`、`number`、`state`、`input`、`exitCode`，以及可选的 `output`（仅 completed）和 `error`。参数或文件读取错误仍以通用 CLI 错误写 stderr，退出码为 1。等待不会写入 `stop.json`，不会停止、重启或重放任务。
+
+```bash
+psm prompt 1 "继续分析" --json   # 记录返回的 number，例如 002
+psm wait 1 --turn 2 --timeout 300 --json
+```
 
 ## 终端实时日志
 

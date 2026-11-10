@@ -18,7 +18,7 @@ CLI 等待 RPC `get_state` 成功并保存实际 provider/model/thinking 后返�
 
 | 模块 | 责任 |
 |---|---|
-| `src/psm/cli.ts` | 创建配置快照、注册 run、list/status/stop/restart/open/prompt/logs、数字 prompt 简写 |
+| `src/psm/cli.ts` | 创建配置快照、注册 run、list/status/stop/restart/open/prompt/wait/logs、数字 prompt 简写 |
 | `src/psm/lifecycle.ts` | worker 启动、停止请求、恢复前校验、轮次对账及 restart |
 | `src/psm/control.ts` | 控制锁、进程存活与启动身份检查 |
 | `src/psm/pipeline.ts` | pipelines/ 目录发现（不执行 JS）、JS 加载/校验、资源继承、启动参数与恢复前内容摘要检查 |
@@ -29,6 +29,7 @@ CLI 等待 RPC `get_state` 成功并保存实际 provider/model/thinking 后返�
 | `src/psm/runs.ts` | 六位 ID 原子分配、注册表、存活判定、状态读取 |
 | `src/psm/interaction.ts` | 并发 prompt 编号与原子发布、归档路径选择 |
 | `src/psm/replies.ts` | 输出 frontmatter、按归档 entry 行号刷新详情定位 |
+| `src/psm/wait.ts` | 固定已提交轮次、只读等待终态、超时与取消，不控制 worker 生命周期 |
 | `src/psm/logs.ts` | 事件尾部读取与只读跟随、text/JSON 输出，无 Markdown 渲染依赖 |
 | `src/psm/table.ts` | 终端宽度自适应列表表格、本地秒级时间 |
 | `src/psm/files.ts` | 私有文件写入、原子替换、JSON I/O |

@@ -11,6 +11,7 @@ import { atomicWrite, delay, now, writeJson } from "./files.ts";
 import { formatRuns } from "./table.ts";
 import { openFile } from "../open.ts";
 import { launchWorker, requestStop, restartRun } from "./lifecycle.ts";
+import { waitForTurn } from "./wait.ts";
 import { followLogs } from "./logs.ts";
 import { archiveFile, submitPrompt } from "./interaction.ts";
 import { allocateRunId, findRun, inspectRun, listRuns, type Run } from "./runs.ts";
@@ -31,9 +32,11 @@ const usage = `psm — file-driven background Pi sessions (Pi >= 1.5; Linux/WSL/
   psm logs <run-id> [--format text|json] [--lines 100] [--no-follow]
   psm prompt <run-id> <text>         Submit the next turn (queued while running)
   psm prompt <run-id> --file <path>   Read a UTF-8 prompt file
+  psm wait <run-id> [--turn <number>] [--timeout <seconds>] [--json]
   psm stop <run-id>                  Request shutdown and wait up to 10 seconds
   psm restart <run-id> [--json]      Restart worker, resume session; never replay interrupted turns
 
+Wait pins the latest submitted turn unless --turn is given; timeout/Ctrl+C only exit the waiter.
 Logs default to text and follow; --lines counts source event lines. Ctrl+C exits only the viewer.
 Quote each prompt as one argument; use -- before a prompt starting with '-'.
 Configure ~/.psm/config.json and ./.psm/config.json (local overrides global).
@@ -81,6 +84,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     format: { type: "string" }, lines: { type: "string" }, "no-follow": { type: "boolean" },
     file: { type: "string" }, level: { type: "string" },
+    turn: { type: "string" }, timeout: { type: "string" },
     help: { type: "boolean", short: "h" }, all: { type: "boolean" }, json: { type: "boolean" }, group: { type: "string" },
   } });
   if (values.help || !positionals.length) { console.log(usage); return; }
@@ -93,6 +97,35 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     throw new Error("--format, --lines and --no-follow are for logs");
   if (values.file !== undefined && !["prompt", "run"].includes(command)) throw new Error("--file is for prompt/run");
   if (values.level !== undefined && command !== "open") throw new Error("--level is for open");
+  if (command !== "wait" && (values.turn !== undefined || values.timeout !== undefined))
+    throw new Error("--turn and --timeout are for wait");
+  if (command === "wait") {
+    if (rest.length !== 1 || values.all || values.group) throw new Error("Usage: psm wait <run-id> [--turn <number>] [--timeout <seconds>] [--json]");
+    if (values.timeout !== undefined && !/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(values.timeout))
+      throw new Error("--timeout must be a positive number of seconds");
+    const run = findRun(rest[0]);
+    const controller = new AbortController();
+    let signalCode = 130;
+    const interrupt = () => { signalCode = 130; controller.abort(); };
+    const terminate = () => { signalCode = 143; controller.abort(); };
+    process.on("SIGINT", interrupt);
+    process.on("SIGTERM", terminate);
+    try {
+      const result = await waitForTurn(run.dir, { turn: values.turn,
+        timeoutSeconds: values.timeout === undefined ? undefined : Number(values.timeout), signal: controller.signal });
+      if (result.state === "cancelled") result.exitCode = signalCode;
+      if (values.json) console.log(JSON.stringify(result, null, 2));
+      else {
+        console.log(`Run: ${result.id}\nTurn: ${result.number}\nState: ${result.state}${result.output ? `\nReply: ${result.output}` : ""}`);
+        if (result.state === "handled") console.log("Handled by extension; no model reply.");
+        if (result.error) console.error(result.error);
+      }
+      process.exitCode = result.exitCode;
+    } finally {
+      process.off("SIGINT", interrupt); process.off("SIGTERM", terminate);
+    }
+    return;
+  }
   if (command === "models") {
     if (rest.length > 1 || values.all || values.group || values.json) throw new Error("Usage: psm models [search]");
     process.stdout.write(await listModels(process.cwd(), rest[0]));
