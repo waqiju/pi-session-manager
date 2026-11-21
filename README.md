@@ -12,6 +12,7 @@ PSM 1.0：通过文件驱动的后台 pi 会话管理器，附带 garden Markdow
 npm install --ignore-scripts --legacy-peer-deps
 npm link --ignore-scripts --legacy-peer-deps
 psm deepseek "分析当前项目结构"    # 就绪后返回 run ID 和目录，在后台继续执行
+psm init web-search --json           # 先申请 run，准备文件后再用 psm prompt 启动
 psm run web-search "搜索近期新闻"  # JS pipeline；示例安装见下文
 psm list                         # 最近 24 小时有活动的 run + 所有存活 run
 psm status 1                     # 数字 ID 自动补齐为 000001
@@ -52,6 +53,8 @@ Pi 在调用命令时的 cwd 工作；首轮结果为 `001.out.md`，多轮交�
 恢复不会回滚工具副作用，也不会从工具中断现场续跑。
 
 普通 `psm "prompt"` 继续关闭自动加载的 Pi 插件、skills 和 MCP，保留默认工具与 cwd 的 AGENTS.md 上下文。
+
+`psm init <pipeline> [--group <name>] [--json]` 先分配正式 ID、建立 run 目录并保存配置，返回 `initialized` 状态，不提交 prompt 或启动 Pi。可在返回的 `dir` 内准备 steps 等业务文件，然后用 `psm prompt <id> --file <path>` 提交首轮并启动原 run。初始化脚本需显式调用，PSM 不自动执行业务 hook。
 
 `psm run <pipeline> "prompt"` 加载 `.psm/pipelines/<pipeline>/pipeline.mjs`（本地优先，再查全局）。
 `psm models [search]` 使用 PSM 配置列出 Pi 可用模型；`psm pipelines [--json]` 列出启动方案，不执行 JS。

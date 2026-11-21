@@ -17,7 +17,7 @@ export interface Run {
   requestedModel?: string;
   config: Config;
   pipeline?: Pipeline;
-  state: "starting" | "idle" | "running" | "stopping" | "stopped" | "failed" | "interrupted";
+  state: "initialized" | "starting" | "idle" | "running" | "stopping" | "stopped" | "failed" | "interrupted";
   createdAt: string;
   updatedAt: string;
   startedAt?: string;

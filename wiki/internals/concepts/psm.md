@@ -35,7 +35,7 @@ CLI 等待 RPC `get_state` 成功并保存实际 provider/model/thinking 后返�
 | `src/psm/files.ts` | 私有文件写入、原子替换、JSON I/O |
 | `src/archive.ts` | 显式源文件和输出基名的 L1/L3 归档入口 |
 
-CLI 在注册 run 和启动 worker 前初始化 `session.l1.md` / `session.l3.md`，展示首条 prompt 与等待结果提示，不创建或修改 Pi 的 `session.jsonl`。启动后归档仅由 worker 写入；`open` 保持只读，避免 CLI 的旧快照覆盖 worker 新归档。初始文档不使用 garden 渲染器或增量版本标记，不影响 `GARDEN_VERSION`。
+CLI 在首次 prompt 发布时、启动 worker 前初始化 `session.l1.md` / `session.l3.md`，展示首条 prompt 与等待结果提示，不创建或修改 Pi 的 `session.jsonl`。启动后归档仅由 worker 写入；`open` 保持只读，避免 CLI 的旧快照覆盖 worker 新归档。初始文档不使用 garden 渲染器或增量版本标记，不影响 `GARDEN_VERSION`。
 
 PSM 不使用 garden 的旧目录推导和兄弟 session 重编号，也不自动接入 `/garden` 选择器。输出渲染器增加可选 entry 行号回调，Markdown 内容格式未改变，因而不改变 `GARDEN_VERSION`。PSM 每轮记录发送前和完成后的 entry 索引边界，归档后刷新所有成功输出中的 L1 行号，避免重复 prompt 或 frontmatter 行数变化导致定位错误。
 
@@ -53,7 +53,9 @@ pipeline 首次执行的结果存入 run 元数据，restart 不执行 JS；启�
 
 ## 状态与完成边界
 
-run 状态：`starting → idle ↔ running → stopping → stopped`，异常终止为 `failed`。读取状态时发现活动 run 的心跳过期或 PID 消失，呈现 `interrupted`，不自动启动新 worker。`psm restart` 在确认旧进程退出后允许 `stopped / failed / interrupted → starting`；仍存活的进程即使心跳过期也不能恢复。
+run 状态：`initialized → starting → idle ↔ running → stopping → stopped`，异常终止为 `failed`。读取状态时发现活动 run 的心跳过期或 PID 消失，呈现 `interrupted`，不自动启动新 worker。`psm restart` 在确认旧进程退出后允许 `stopped / failed / interrupted → starting`；仍存活的进程即使心跳过期也不能恢复。
+
+`psm init <pipeline>` 只申请正式 ID、建立目录与配置快照并注册 initialized run，不启动 worker/Pi 或创建输入回合。业务初始化脚本在返回目录显式运行；首个 `psm prompt` 在 control.lock 内校验 pipeline 摘要、发布首轮并启动原 run。`psm run` 复用初始化和提交逻辑，一步完成。initialized 没有 startedAt，不触发心跳失联或 idle 超时；stop 不操作，restart 提示先提交首轮。配置及 pipeline 工厂结果在 init 时固定，实际模型在首次启动后解析。
 
 默认连续 idle 24 小时且没有待消费输入时停止，stopReason 为 idle_timeout；`idleTimeoutMs: 0` 禁用。idleSince 在进入 idle 时更新，心跳与查询不更新该时间，running 不受空闲超时影响。临时 control.lock 协调 CLI 发布与空闲停止判定，获得锁后再次检查队列；CLI 已成功发布的输入优先消费。手动写文件不参与控制锁，应避免在临近停止时发布并检查轮次状态。
 

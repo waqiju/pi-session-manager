@@ -82,6 +82,7 @@ function recoveryPlan(run: Run) {
 export async function restartRun(dir: string): Promise<Run & { pendingTurns: string[] }> {
   return withRunLock(dir, async () => {
     const inspected = inspectRun(dir);
+    if (inspected.state === "initialized") throw new Error(`Run is initialized but not started; submit its first prompt with psm prompt ${inspected.id}`);
     if (!["stopped", "failed", "interrupted"].includes(inspected.state)) throw new Error(`Cannot restart run in state ${inspected.state}; stop it first`);
     const run: Run = readJson(path.join(dir, "run.json"));
     const launch = readJson(path.join(dir, "launch.json"), {});

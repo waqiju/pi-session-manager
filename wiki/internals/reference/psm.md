@@ -5,6 +5,7 @@
 ```bash
 psm <model-expression> "首条 prompt" [--group research] [--json]
 psm "首条 prompt"                       # config.defaultModel
+psm init web-search [--group research] [--json] # 申请目录，不提交任务或启动 Pi
 psm run web-search "搜索近期新闻" [--group research] [--json]
 psm run web-search --file ./question.md
 psm models [search]                    # 当前 PSM 配置下的可用模型
@@ -27,11 +28,21 @@ psm prompt 1 --file ./prompt.md [--json]
 psm --help
 ```
 
-prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`restart`、`open`、`prompt`、`wait`、`logs`、`run`、`models`、`pipelines` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型表达式消除歧义。
+prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项解析。`list`、`status`、`stop`、`restart`、`open`、`prompt`、`wait`、`logs`、`init`、`run`、`models`、`pipelines` 是保留子命令，不能作为无模型参数时的单独 prompt；可显式指定模型表达式消除歧义。
 
 默认 `list` 显示最近 24 小时有活动的 run，加上所有仍存活的 run；`--all` 显示全部注册历史。注册表跨 cwd，位于 `~/.psm/registry/`。已删除 run 目录的记录跳过。所有按 run 操作的命令接受 1～6 位数字简写，补齐六位后精确匹配；0 或超过六位的数字无效，数字不作前缀查询。历史非数字 ID 仍可用唯一前缀。status 输出 JSON；stop 最多等待 10 秒，超时返回非零并提示停止请求尚未确认。
 
 启动命令在 worker 和 Pi 就绪后返回 run ID、实际 provider/model、thinking、目录和首轮结果路径；不会向终端输出模型回答。启动失败返回非零并提供 run 目录。命令成功只表示后台就绪，后续模型错误见轮次状态。
+
+## 先初始化 run
+
+`psm init <pipeline> [--group <name>] [--json]` 加载并校验 pipeline，预留正式 ID，创建 run 目录、agent 配置与 logs 目录，登记 registry。返回状态为 `initialized`；JSON 包含 `id`、`dir`、`pipeline` 和配置快照。此时没有 `startedAt`、worker/Pi 进程、输入回合或 session/归档文件，实际模型仍待启动后解析。PSM 不发送模型请求；pipeline 工厂仍会作为本地 JS 执行。
+
+在返回的 `dir` 内显式调用业务初始化脚本，准备 steps/framework 等文件。不要覆盖 PSM 管理的文件，也不要修改源 pipeline 来填写本次参数。初始化脚本失败可直接修复该 run 内的业务文件，无需重新申请 ID；重复调用 init 会申请新 run，不是恢复之前的申请。
+
+首次 `psm prompt <id> <text>`（也支持 `--file` 和数字简写）在控制锁内校验资源摘要，发布 `001.in.md`、创建初始阅读归档并启动同一个 run，等 worker/Pi 就绪后返回。配置采用 init 时保存的快照，pipeline JS 不重复执行。启动前校验失败保持 initialized 且不发布输入；worker 启动失败保留输入与诊断，可修复后使用 restart，沿用不重放已发送轮次的规则。并发 prompt 串行处理；锁等待超时的调用需重试。
+
+`list/status` 可查看 initialized run；它不受 idle 超时影响，默认 list 仍遵循最近 24 小时筛选。`stop` 对它不作更改，`restart` 拒绝并提示先提交 prompt。没有已提交轮次时 `wait` 报错；`open` 在首轮提交前报告归档尚不可用。手工写 `.in.md` 不会启动 initialized run，首轮必须通过 `psm prompt` 提交。
 
 ## 模型与 pipeline 列表
 
@@ -55,7 +66,7 @@ restart 不再执行 JS，资源摘要不匹配时拒绝恢复；两种模式不
 
 首参数为纯数字且带第二个位置参数或 `--file` 时，`psm 1 "文本"` / `psm 1 --file ./prompt.md` 等同于显式 `psm prompt`，也支持 `--json`。数字必须为 1～6 位且大于零；无效或不存在的 ID 直接报错，不回退创建 run。该形式下纯数字模型表达式让位给 run ID；单独 `psm "123"` 仍使用默认模型创建首条 prompt 为 `123` 的 run。
 
-同一 run 的 CLI 提交通过 `control.lock/` 串行分配连续编号，并与停止请求、restart 和 idle 超时判定互斥。临时文件写完后以不覆盖目标的原子硬链接发布，最后移除临时文件。手工文件若抢先占用编号，命令报错而不覆盖；已有编号缺口需先修复。锁等待最多 5 秒；持锁进程意外退出可能遗留锁，查看 `control.lock/owner.json` 并确认所属进程已退出后才能删除该目录重试，不自动按锁年龄回收。仅接受存活的 idle/running run；running 时排队，不作 steering，不隐式恢复已停止的 run。与手动停止并发时，已发布输入也可能留在队列未执行，应检查状态。
+同一 run 的 CLI 提交通过 `control.lock/` 串行分配连续编号，并与停止请求、restart 和 idle 超时判定互斥。临时文件写完后以不覆盖目标的原子硬链接发布，最后移除临时文件。手工文件若抢先占用编号，命令报错而不覆盖；已有编号缺口需先修复。锁等待最多 5 秒；持锁进程意外退出可能遗留锁，查看 `control.lock/owner.json` 并确认所属进程已退出后才能删除该目录重试，不自动按锁年龄回收。首次 prompt 也接受 initialized run 并启动它；除此之外仅接受存活的 idle/running run；running 时排队，不作 steering，不隐式恢复已停止的 run。与手动停止并发时，已发布输入也可能留在队列未执行，应检查状态。
 
 ## 等待单轮完成
 

@@ -6,7 +6,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { startRun } from "../src/psm/cli.ts";
+import { initPipeline, startRun } from "../src/psm/cli.ts";
+import { waitForTurn } from "../src/psm/wait.ts";
 import { restartRun, requestStop } from "../src/psm/lifecycle.ts";
 import { submitPrompt } from "../src/psm/interaction.ts";
 import { inspectRun, listRuns } from "../src/psm/runs.ts";
@@ -51,6 +52,81 @@ async function stopped(dir: string) {
   await requestStop(dir);
   await until(() => inspectRun(dir).state === "stopped");
 }
+
+function pipeline(cwd: string) {
+  atomicWrite(path.join(cwd, ".psm/pipelines/train/pipeline.mjs"),
+    'export default () => ({ resources: "isolated", group: "training" });');
+}
+
+test("init CLI reserves a discoverable run without inputs, session or processes", async (t) => {
+  const { cwd, home } = setup(t);
+  pipeline(cwd);
+  const { stdout } = await exec(process.execPath, [cli, "init", "train", "--group", "prepared", "--json"], { cwd });
+  const run = JSON.parse(stdout);
+  assert.equal(run.state, "initialized");
+  assert.equal(run.group, "prepared");
+  assert.equal(run.dir, path.join(cwd, ".psm/runs/prepared", run.id));
+  assert.equal(run.pipeline.name, "train");
+  assert.equal(run.startedAt, undefined);
+  assert.equal(run.workerPid, undefined);
+  assert.equal(run.model, undefined);
+  assert.ok(existsSync(path.join(run.dir, "agent/settings.json")));
+  for (const file of ["001.in.md", "session.jsonl", "session.l3.md", "launch.json", "worker.lock", "logs/events.jsonl"])
+    assert.equal(existsSync(path.join(run.dir, file)), false, file);
+  assert.equal(listRuns(home)[0].state, "initialized");
+  assert.equal(inspectRun(run.dir).alive, false);
+  assert.equal((await requestStop(run.dir)).state, "initialized");
+  assert.equal(existsSync(path.join(run.dir, "stop.json")), false);
+  await assert.rejects(restartRun(run.dir), /submit its first prompt/);
+  await assert.rejects(waitForTurn(run.dir), /Submitted turn not found/);
+  await assert.rejects(submitPrompt(run.dir, "  "), /empty/);
+  assert.equal(inspectRun(run.dir).state, "initialized");
+  const next = await initPipeline(cwd, "train");
+  assert.equal(Number(next.id), Number(run.id) + 1);
+  assert.equal(next.group, "training");
+  await assert.rejects(exec(process.execPath, [cli, "init", "train", "unexpected"], { cwd }), /Usage: psm init/);
+  await assert.rejects(exec(process.execPath, [cli, "init", "train", "--file", "missing"], { cwd }), /--file is for/);
+});
+
+test("first prompt starts the reserved run once and concurrent submissions keep consecutive turns", async (t) => {
+  const { cwd, home } = setup(t);
+  pipeline(cwd);
+  const run = await initPipeline(cwd, "train");
+  atomicWrite(path.join(run.dir, "steps/prepared.txt"), "run-specific inputs");
+  const results = await Promise.all([submitPrompt(run.dir, "first"), submitPrompt(run.dir, "second")]);
+  assert.deepEqual(results.map((r) => r.number).sort(), ["001", "002"]);
+  await until(() => status(run.dir, "002").state === "completed");
+  const active = inspectRun(run.dir);
+  assert.equal(active.id, run.id);
+  assert.equal(active.token, run.token);
+  assert.equal(active.restartCount, 0);
+  assert.ok(active.startedAt);
+  assert.equal(listRuns(home, true).length, 1);
+  assert.equal(readFileSync(path.join(run.dir, "steps/prepared.txt"), "utf8"), "run-specific inputs");
+  const prompts = readFileSync(path.join(run.dir, "prompts.jsonl"), "utf8").trim().split("\n");
+  assert.equal(prompts.length, 2);
+  const promptFile = path.join(cwd, "next.md");
+  atomicWrite(promptFile, "third");
+  const { stdout } = await exec(process.execPath, [cli, run.id, "--file", promptFile, "--json"], { cwd });
+  assert.equal(JSON.parse(stdout).number, "003");
+  await until(() => status(run.dir, "003").state === "completed");
+});
+
+test("initialized run rejects changed pipeline before publishing and can retry after repair", async (t) => {
+  const { cwd } = setup(t);
+  pipeline(cwd);
+  const run = await initPipeline(cwd, "train");
+  const source = path.join(cwd, ".psm/pipelines/train/pipeline.mjs");
+  const original = readFileSync(source, "utf8");
+  atomicWrite(source, original + "\n// changed");
+  await assert.rejects(submitPrompt(run.dir, "first"), /Pipeline resource changed/);
+  assert.equal(inspectRun(run.dir).state, "initialized");
+  assert.equal(existsSync(path.join(run.dir, "001.in.md")), false);
+  atomicWrite(source, original);
+  const { stdout } = await exec(process.execPath, [cli, "prompt", run.id, "first", "--json"], { cwd });
+  assert.equal(JSON.parse(stdout).number, "001");
+  await until(() => status(run.dir, "001").state === "completed");
+});
 
 test("idle timeout defaults to 24 hours, supports disabling, rejects invalid values", (t) => {
   const { cwd } = setup(t);

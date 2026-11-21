@@ -49,7 +49,7 @@ export async function waitForTurn(dir: string, options: {
     try {
       const run = inspectRun(dir);
       missingSince = undefined;
-      if (["stopped", "failed", "interrupted"].includes(run.state)) {
+      if (["initialized", "stopped", "failed", "interrupted"].includes(run.state)) {
         // Completion can be published between the first status read and the run read.
         const finished = terminal();
         if (finished) return finished;

@@ -7,10 +7,10 @@ import { parseArgs } from "node:util";
 import { listPipelines, loadPipeline, preparePipeline, type Pipeline } from "./pipeline.ts";
 import { listModels } from "./models.ts";
 import { psmHome, loadConfig, selectModel } from "./config.ts";
-import { atomicWrite, delay, now, writeJson } from "./files.ts";
+import { delay, now, writeJson } from "./files.ts";
 import { formatRuns } from "./table.ts";
 import { openFile } from "../open.ts";
-import { launchWorker, requestStop, restartRun } from "./lifecycle.ts";
+import { requestStop, restartRun } from "./lifecycle.ts";
 import { waitForTurn } from "./wait.ts";
 import { followLogs } from "./logs.ts";
 import { archiveFile, submitPrompt } from "./interaction.ts";
@@ -20,6 +20,7 @@ const usage = `psm — file-driven background Pi sessions (Pi >= 1.5; Linux/WSL/
 
   psm <model-expression> <first-prompt> [--group <name>]
   psm <first-prompt>                 Use config.defaultModel
+  psm init <pipeline> [--group <name>] [--json]  Reserve a run without submitting a prompt
   psm run <pipeline> <first-prompt> [--group <name>] [--json]
   psm run <pipeline> --file <path>   Run .psm/pipelines/<pipeline>/pipeline.mjs (local, then global)
   psm models [search]               List available models using PSM configuration
@@ -49,9 +50,20 @@ export async function startPipeline(cwd: string, name: string, prompt: string, g
   return startRun(cwd, prompt, pipeline.model, group ?? pipeline.group ?? "default", pipeline);
 }
 
+export async function initPipeline(cwd: string, name: string, group?: string): Promise<Run> {
+  const pipeline = await loadPipeline(cwd, loadConfig(cwd).home, name);
+  return initializeRun(cwd, pipeline.model, group ?? pipeline.group ?? "default", pipeline);
+}
+
 export async function startRun(cwd: string, prompt: string, modelExpression?: string, group = "default", pipeline?: Pipeline): Promise<Run> {
-  if (process.platform === "win32") throw new Error("Native Windows is not supported yet; use WSL");
   if (!prompt.trim()) throw new Error("First prompt must not be empty");
+  const run = initializeRun(cwd, modelExpression, group, pipeline);
+  await submitPrompt(run.dir, prompt);
+  return inspectRun(run.dir);
+}
+
+function initializeRun(cwd: string, modelExpression?: string, group = "default", pipeline?: Pipeline): Run {
+  if (process.platform === "win32") throw new Error("Native Windows is not supported yet; use WSL");
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(group)) throw new Error("Group must use 1–64 letters, numbers, '_' or '-'");
   const loaded = loadConfig(cwd);
   if (pipeline) loaded.config = { ...loaded.config, ...pipeline.config };
@@ -67,17 +79,10 @@ export async function startRun(cwd: string, prompt: string, modelExpression?: st
   if (pipeline) preparePipeline(pipeline, agent, cwd);
   const run: Run = { schema: 1, id, token: randomUUID(), dir, cwd, group, requestedModel, config: loaded.config,
     ...(pipeline ? { pipeline } : {}),
-    state: "starting", createdAt: now(), startedAt: now(), updatedAt: now(), restartCount: 0 };
+    state: "initialized", createdAt: now(), updatedAt: now(), restartCount: 0 };
   writeJson(path.join(dir, "run.json"), run);
-  atomicWrite(path.join(dir, "001.in.md"), prompt);
-  // Initialize before publishing the run or spawning its sole archive writer.
-  // Pi owns session.jsonl; this waiting document is not a synthetic session.
-  const initialArchive = `# PSM run ${id}\n\n> Waiting for the first turn result. PSM replaces this document when the turn ends.\n> Check \`psm status ${id}\` for run status.\n\n## First prompt\n\n${prompt}\n`;
-  for (const level of ["l1", "l3"]) {
-    atomicWrite(path.join(dir, `session.${level}.md`), initialArchive);
-  }
   writeJson(path.join(loaded.home, "registry", `${id}.json`), { id, dir });
-  return launchWorker(run);
+  return run;
 }
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
@@ -142,6 +147,13 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       for (const p of pipelines) console.log(`${p.name.padEnd(width)}  ${p.scope.padEnd(6)}  ${(p.entryExists ? "present" : "missing").padEnd(7)}  ${p.file}`);
       console.log("Entry presence only; JS is not executed or validated. Local entries override global entries.");
     }
+    return;
+  }
+  if (command === "init") {
+    if (rest.length !== 1 || values.all) throw new Error("Usage: psm init <pipeline> [--group <name>] [--json]");
+    const run = await initPipeline(process.cwd(), rest[0], values.group);
+    if (values.json) console.log(JSON.stringify(run, null, 2));
+    else console.log(`Run: ${run.id}\nState: ${run.state}\nPipeline: ${run.pipeline!.name}\nDirectory: ${run.dir}\nSubmit the first prompt with: psm prompt ${run.id} --file <path>`);
     return;
   }
   if (command === "run") {

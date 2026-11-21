@@ -33,6 +33,22 @@ psm run web-search --file ./question.md
 
 每次工具调用总期限 30 秒；408、429、5xx 和连接错误最多重试两次。取消会中止请求与重试等待。401、402 等不会自动重试；错误不回显响应正文或密钥。拒绝重定向，响应最多 8 MiB；模型收到的结果限制 2000 行 / 50 KiB，超出部分写入私有临时文件，工具结果给出路径。工具的网页内容是外部资料，不作为执行指令。
 
+### 先申请 run，再初始化业务文件
+
+需要先知道本次 run 目录时，使用两阶段流程：
+
+```bash
+psm init train-1104 --json
+# 从结果取得 <run-dir> 与 <id>；以下 init.py 由业务 pipeline 自行提供
+python .psm/pipelines/train-1104/init.py <run-dir>
+# 填写本次 steps 参数、检查预览后再提交
+psm prompt <id> --file <prompt-file>
+```
+
+`init` 返回正式的 run ID 和目录，状态为 `initialized`；不会发送 prompt 或启动 worker/Pi。它会加载 pipeline 工厂并保存配置、认证和资源摘要。PSM 不自动调用 `init.py` 或其他业务 hook；把 steps/framework 放在 run 目录，避免修改已记录摘要的源 pipeline。业务准备失败可在同一目录修复后继续。
+
+首个 `prompt` 在原 run 内发布 `001.in.md` 并启动，pipeline 工厂不会再次执行；模型实际选择在 Pi 就绪后记录。启动前发现资源变化则拒绝发布输入，恢复资源后可重试。启动失败保留 run 与输入，使用 `status` 检查并在修复后 `restart`。尚未启动的 run 不适用 restart，也没有可等待的轮次。原有 `psm run` 仍提供一步创建并启动的方式。
+
 ### 定义 pipeline
 
 ```text
@@ -104,7 +120,7 @@ inherit 把 settings、指令和 MCP 配置复制到私有 agent 目录，重定
 
 ### 恢复与变更检查
 
-首次启动执行 JS 一次，将解析结果、资源来源和内容摘要写入 `run.json.pipeline`。restart 复用这份结果和实际模型，不重新执行 pipeline 函数。源 pipeline、显式资源、继承配置、指令等发生变化时拒绝恢复，提示恢复文件或创建新 run；原 run 的检查点和 restartCount 不受拒绝影响。
+申请 run 时（`init` 或 `run`）执行 JS 一次，将解析结果、资源来源和内容摘要写入 `run.json.pipeline`。首次 prompt 与 restart 复用这份结果；restart 同时复用已解析的实际模型，不重新执行 pipeline 函数。源 pipeline、显式资源、继承配置、指令等发生变化时拒绝恢复，提示恢复文件或创建新 run；原 run 的检查点和 restartCount 不受拒绝影响。
 
 摘要检查包含目录成员和符号链接目标；跳过 `.git`、嵌套 `node_modules` 和 `.psm` 运行存储。它用于检测配置/资源漂移，不是完整的依赖锁：JS 在目录外动态导入的模块、glob 范围外的资源、扩展运行时发现的文件、环境变量和 Pi 安装版本不保证固定；更新这些内容后建议新建 run。模型配置仍遵守原 PSM 的 models.json 符号链接规则。
 
