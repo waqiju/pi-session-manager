@@ -152,7 +152,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (command === "init") {
     if (rest.length !== 1 || values.all) throw new Error("Usage: psm init <pipeline> [--group <name>] [--json]");
     const run = await initPipeline(process.cwd(), rest[0], values.group);
-    if (values.json) console.log(JSON.stringify(run, null, 2));
+    if (values.json) console.log(JSON.stringify({ id: run.id, dir: run.dir, pipeline: run.pipeline!.name, state: run.state }, null, 2));
     else console.log(`Run: ${run.id}\nState: ${run.state}\nPipeline: ${run.pipeline!.name}\nDirectory: ${run.dir}\nSubmit the first prompt with: psm prompt ${run.id} --file <path>`);
     return;
   }

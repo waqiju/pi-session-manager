@@ -36,7 +36,7 @@ prompt 必须作为一个参数传入；以 `-` 开头时用 `--` 结束选项�
 
 ## 先初始化 run
 
-`psm init <pipeline> [--group <name>] [--json]` 加载并校验 pipeline，预留正式 ID，创建 run 目录、agent 配置与 logs 目录，登记 registry。返回状态为 `initialized`；JSON 包含 `id`、`dir`、`pipeline` 和配置快照。此时没有 `startedAt`、worker/Pi 进程、输入回合或 session/归档文件，实际模型仍待启动后解析。PSM 不发送模型请求；pipeline 工厂仍会作为本地 JS 执行。
+`psm init <pipeline> [--group <name>] [--json]` 加载并校验 pipeline，预留正式 ID，创建 run 目录、agent 配置与 logs 目录，登记 registry。返回状态为 `initialized`；JSON 仅返回 `id`、`dir`、`pipeline`（名称字符串）、`state` 四个字段；完整配置快照和资源摘要保存在 run 元数据中，可通过 `psm status <id>` 查看。此时没有 `startedAt`、worker/Pi 进程、输入回合或 session/归档文件，实际模型仍待启动后解析。PSM 不发送模型请求；pipeline 工厂仍会作为本地 JS 执行。
 
 在返回的 `dir` 内显式调用业务初始化脚本，准备 steps/framework 等文件。不要覆盖 PSM 管理的文件，也不要修改源 pipeline 来填写本次参数。初始化脚本失败可直接修复该 run 内的业务文件，无需重新申请 ID；重复调用 init 会申请新 run，不是恢复之前的申请。
 

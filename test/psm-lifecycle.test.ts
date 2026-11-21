@@ -63,13 +63,13 @@ test("init CLI reserves a discoverable run without inputs, session or processes"
   pipeline(cwd);
   const { stdout } = await exec(process.execPath, [cli, "init", "train", "--group", "prepared", "--json"], { cwd });
   const run = JSON.parse(stdout);
-  assert.equal(run.state, "initialized");
-  assert.equal(run.group, "prepared");
-  assert.equal(run.dir, path.join(cwd, ".psm/runs/prepared", run.id));
-  assert.equal(run.pipeline.name, "train");
-  assert.equal(run.startedAt, undefined);
-  assert.equal(run.workerPid, undefined);
-  assert.equal(run.model, undefined);
+  assert.deepEqual(run, { id: run.id, dir: path.join(cwd, ".psm/runs/prepared", run.id), pipeline: "train", state: "initialized" });
+  const saved = inspectRun(run.dir);
+  assert.equal(saved.group, "prepared");
+  assert.equal(saved.pipeline?.name, "train");
+  assert.equal(saved.startedAt, undefined);
+  assert.equal(saved.workerPid, undefined);
+  assert.equal(saved.model, undefined);
   assert.ok(existsSync(path.join(run.dir, "agent/settings.json")));
   for (const file of ["001.in.md", "session.jsonl", "session.l3.md", "launch.json", "worker.lock", "logs/events.jsonl"])
     assert.equal(existsSync(path.join(run.dir, file)), false, file);
